@@ -1,0 +1,102 @@
+{
+  "plugin_id": "continuum.oidc-login",
+  "version": "0.1.0",
+  "checksum": "__CHECKSUM__",
+  "continuum_api_version": "v1",
+  "capabilities": [
+    {
+      "type": "auth_provider.v1",
+      "id": "oidc",
+      "display_name": "Sign in with OIDC",
+      "description": "Generic OIDC authentication. Multi-instance: install once per IdP.",
+      "auth_modes": ["oauth2"],
+      "icon_url": "/assets/generic-key.svg"
+    },
+    {
+      "type": "http_routes.v1",
+      "id": "spa",
+      "display_name": "OIDC admin SPA",
+      "description": "Visual editors for claim filters and role mapping."
+    }
+  ],
+  "http_routes": [
+    {"id": "assets", "method": "GET", "path": "/assets/*", "access": "public"},
+    {"id": "admin_html", "method": "GET", "path": "/admin", "access": "authenticated"},
+    {"id": "admin_html_sub", "method": "GET", "path": "/admin/*", "access": "authenticated"},
+    {"id": "admin_api", "method": "*", "path": "/api/v1/admin/*", "access": "authenticated"},
+    {"id": "health", "method": "GET", "path": "/api/v1/health", "access": "public"}
+  ],
+  "global_config_schema": [
+    {
+      "key": "issuer_url",
+      "title": "Issuer URL",
+      "required": true,
+      "description": "OIDC issuer URL, e.g. https://auth.example.com. Discovery resolves <issuer>/.well-known/openid-configuration.",
+      "json_schema": "{\"type\":\"object\",\"properties\":{\"value\":{\"type\":\"string\"}},\"required\":[\"value\"]}",
+      "admin_form": {"fields": [{"key": "value", "label": "URL", "control": "ADMIN_FORM_CONTROL_TEXT", "required": true}]}
+    },
+    {
+      "key": "client_id",
+      "title": "Client ID",
+      "required": true,
+      "json_schema": "{\"type\":\"object\",\"properties\":{\"value\":{\"type\":\"string\"}},\"required\":[\"value\"]}",
+      "admin_form": {"fields": [{"key": "value", "label": "Client ID", "control": "ADMIN_FORM_CONTROL_TEXT", "required": true}]}
+    },
+    {
+      "key": "client_secret",
+      "title": "Client secret",
+      "required": true,
+      "json_schema": "{\"type\":\"object\",\"properties\":{\"value\":{\"type\":\"string\"}},\"required\":[\"value\"]}",
+      "admin_form": {"fields": [{"key": "value", "label": "Client secret", "control": "ADMIN_FORM_CONTROL_PASSWORD", "required": true, "secret": true}]}
+    },
+    {
+      "key": "scopes",
+      "title": "Scopes",
+      "description": "Space-separated. Default: openid profile email.",
+      "json_schema": "{\"type\":\"object\",\"properties\":{\"value\":{\"type\":\"string\"}}}",
+      "admin_form": {"fields": [{"key": "value", "label": "Scopes", "control": "ADMIN_FORM_CONTROL_TEXT"}]}
+    },
+    {
+      "key": "display_name",
+      "title": "Display name",
+      "description": "Login button label. Configurable per install for multi-IdP setups.",
+      "json_schema": "{\"type\":\"object\",\"properties\":{\"value\":{\"type\":\"string\"}}}",
+      "admin_form": {"fields": [{"key": "value", "label": "Button label", "control": "ADMIN_FORM_CONTROL_TEXT"}]}
+    },
+    {
+      "key": "icon_url_path",
+      "title": "Icon",
+      "description": "Bundled icon filename (e.g., authentik.svg). Managed via /admin SPA.",
+      "json_schema": "{\"type\":\"object\",\"properties\":{\"value\":{\"type\":\"string\"}}}",
+      "admin_form": {"fields": [{"key": "value", "label": "Icon", "control": "ADMIN_FORM_CONTROL_TEXT"}]}
+    },
+    {
+      "key": "claim_filters",
+      "title": "Claim filters",
+      "description": "JSON array of {claim_path, operator, value}. Managed via /admin SPA.",
+      "json_schema": "{\"type\":\"object\",\"properties\":{\"value\":{\"type\":\"array\"}}}",
+      "admin_form": {"fields": [{"key": "value", "label": "Filters", "control": "ADMIN_FORM_CONTROL_TEXT"}]}
+    },
+    {
+      "key": "claim_role_mapping",
+      "title": "Claim role mapping",
+      "description": "JSON array of {claim_path, operator, value, role}. Managed via /admin SPA.",
+      "json_schema": "{\"type\":\"object\",\"properties\":{\"value\":{\"type\":\"array\"}}}",
+      "admin_form": {"fields": [{"key": "value", "label": "Mapping", "control": "ADMIN_FORM_CONTROL_TEXT"}]}
+    },
+    {
+      "key": "email_verified_required",
+      "title": "Require verified email",
+      "description": "If true, reject id_tokens with email_verified=false. Default: true.",
+      "json_schema": "{\"type\":\"object\",\"properties\":{\"value\":{\"type\":\"boolean\"}}}",
+      "admin_form": {"fields": [{"key": "value", "label": "Require verified email", "control": "ADMIN_FORM_CONTROL_CHECKBOX"}]}
+    },
+    {
+      "key": "link_by_email",
+      "title": "Auto-link by email",
+      "description": "If true, on email collision auto-link to existing continuum user. Otherwise show confirmation page (safer). Default: false.",
+      "json_schema": "{\"type\":\"object\",\"properties\":{\"value\":{\"type\":\"boolean\"}}}",
+      "admin_form": {"fields": [{"key": "value", "label": "Auto-link by email", "control": "ADMIN_FORM_CONTROL_CHECKBOX"}]}
+    }
+  ]
+}
