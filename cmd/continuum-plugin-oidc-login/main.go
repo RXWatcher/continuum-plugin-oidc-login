@@ -20,6 +20,7 @@ import (
 	publicmanifest "github.com/ContinuumApp/continuum-plugin-sdk/pkg/pluginsdk/manifest"
 	sdkruntime "github.com/ContinuumApp/continuum-plugin-sdk/pkg/pluginsdk/runtime"
 
+	pluginadmin "github.com/ContinuumApp/continuum-plugin-oidc-login/internal/admin"
 	pluginauth "github.com/ContinuumApp/continuum-plugin-oidc-login/internal/auth"
 	"github.com/ContinuumApp/continuum-plugin-oidc-login/internal/httproutes"
 	pluginoidc "github.com/ContinuumApp/continuum-plugin-oidc-login/internal/oidc"
@@ -71,7 +72,17 @@ func main() {
 		cfgPtr.Store(&cfg)
 		provPtr.Store(prov)
 
-		srv := server.New(server.Deps{})
+		adminSrv := pluginadmin.NewServer(pluginadmin.Deps{
+			ConfigFn: func() pluginrt.Config {
+				if p := cfgPtr.Load(); p != nil {
+					return *p
+				}
+				return pluginrt.Config{}
+			},
+			ProviderFn: func() *pluginoidc.Provider { return provPtr.Load() },
+		})
+
+		srv := server.New(server.Deps{AdminHandler: adminSrv.Handler()})
 		httpSrv.SetHandler(srv.Handler())
 		logger.Info("configured", "issuer_url", cfg.IssuerURL, "display_name", cfg.DisplayName)
 		return nil
