@@ -1,0 +1,201 @@
+// Package auth implements the auth_provider.v1 capability for OIDC. It owns
+// InitAuthorize (PKCE + nonce + authorize URL construction) and ExchangeCode
+// (token exchange, JWKS id_token verification, nonce check, userinfo merge,
+// email_verified + claim-filter gating). The host applies the role mapping
+// itself against the returned claims; this server returns the merged claims
+// and lets that downstream pass do its job.
+package auth
+
+import (
+	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+
+	"golang.org/x/oauth2"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/structpb"
+
+	pluginv1 "github.com/ContinuumApp/continuum-plugin-sdk/pkg/pluginproto/continuum/plugin/v1"
+
+	"github.com/ContinuumApp/continuum-plugin-oidc-login/internal/claims"
+	pluginoidc "github.com/ContinuumApp/continuum-plugin-oidc-login/internal/oidc"
+	pluginrt "github.com/ContinuumApp/continuum-plugin-oidc-login/internal/runtime"
+)
+
+// Server implements pluginv1.AuthProviderServer. Configuration and the OIDC
+// provider live behind closures so main.go can swap them at Configure time
+// without locking.
+type Server struct {
+	pluginv1.UnimplementedAuthProviderServer
+	cfgFn  func() pluginrt.Config
+	provFn func() *pluginoidc.Provider
+}
+
+// NewServer wires the supplied accessors. Both are called fresh per RPC; the
+// plugin process holds the live values behind atomic pointers in main.go.
+func NewServer(cfgFn func() pluginrt.Config, provFn func() *pluginoidc.Provider) *Server {
+	return &Server{cfgFn: cfgFn, provFn: provFn}
+}
+
+// Authenticate is the password flow which OIDC does not support. The manifest
+// declares auth_modes=["oauth2"], so the host should not be calling this.
+func (s *Server) Authenticate(_ context.Context, _ *pluginv1.AuthenticateRequest) (*pluginv1.AuthenticateResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "OIDC plugin is OAuth-only; use InitAuthorize / ExchangeCode")
+}
+
+// RefreshSession is not supported in v1; the user re-runs the OAuth flow.
+func (s *Server) RefreshSession(_ context.Context, _ *pluginv1.RefreshSessionRequest) (*pluginv1.AuthenticateResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "refresh not supported in v1")
+}
+
+// InitAuthorize generates PKCE + nonce, builds the authorize URL using the
+// discovered authorization_endpoint, and returns the provider_state the host
+// must round-trip back via ExchangeCode.
+func (s *Server) InitAuthorize(_ context.Context, req *pluginv1.InitAuthorizeRequest) (*pluginv1.InitAuthorizeResponse, error) {
+	prov := s.provFn()
+	if prov == nil {
+		return nil, status.Error(codes.FailedPrecondition, "plugin not configured")
+	}
+
+	verifier := randB64(48)
+	challenge := pkceS256(verifier)
+	nonce := randB64(32)
+
+	cfg := prov.OAuth2Config()
+	cfg.RedirectURL = req.GetRedirectUri()
+
+	authURL := cfg.AuthCodeURL(req.GetState(),
+		oauth2.SetAuthURLParam("nonce", nonce),
+		oauth2.SetAuthURLParam("code_challenge", challenge),
+		oauth2.SetAuthURLParam("code_challenge_method", "S256"),
+	)
+
+	pState, err := structpb.NewStruct(map[string]any{
+		"pkce_verifier": verifier,
+		"nonce":         nonce,
+	})
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "structpb: %v", err)
+	}
+	return &pluginv1.InitAuthorizeResponse{AuthorizeUrl: authURL, ProviderState: pState}, nil
+}
+
+// ExchangeCode runs the OIDC callback half of the flow:
+//  1. Re-derive PKCE verifier + nonce from provider_state.
+//  2. Exchange the auth code for tokens (oauth2 lib handles client auth).
+//  3. Verify the id_token signature against JWKS, audience, issuer, expiry.
+//  4. Verify nonce roundtrip.
+//  5. Merge id_token claims with userinfo (userinfo wins on collision).
+//  6. Apply email_verified_required + claim_filters gates.
+//  7. Return identity + merged claims for the host's role-mapping pass.
+func (s *Server) ExchangeCode(ctx context.Context, req *pluginv1.ExchangeCodeRequest) (*pluginv1.AuthenticateResponse, error) {
+	cfg := s.cfgFn()
+	prov := s.provFn()
+	if prov == nil {
+		return nil, status.Error(codes.FailedPrecondition, "plugin not configured")
+	}
+
+	pState := req.GetProviderState().AsMap()
+	verifier, _ := pState["pkce_verifier"].(string)
+	expectedNonce, _ := pState["nonce"].(string)
+	if verifier == "" || expectedNonce == "" {
+		return nil, status.Error(codes.InvalidArgument, "missing pkce_verifier or nonce in provider_state")
+	}
+
+	oc := prov.OAuth2Config()
+	oc.RedirectURL = req.GetRedirectUri()
+
+	tok, err := oc.Exchange(ctx, req.GetCode(),
+		oauth2.SetAuthURLParam("code_verifier", verifier),
+	)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "token exchange: %v", err)
+	}
+
+	rawIDToken, _ := tok.Extra("id_token").(string)
+	if rawIDToken == "" {
+		return nil, status.Error(codes.Internal, "no id_token in response")
+	}
+	idToken, err := prov.Verifier().Verify(ctx, rawIDToken)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "id_token verification: %v", err)
+	}
+	if idToken.Nonce != expectedNonce {
+		return nil, status.Error(codes.Unauthenticated, "nonce mismatch")
+	}
+
+	var idClaims map[string]any
+	if err := idToken.Claims(&idClaims); err != nil {
+		return nil, status.Errorf(codes.Internal, "decode id_token claims: %v", err)
+	}
+
+	// Merge id_token claims with userinfo. userinfo wins on collision per spec
+	// Layer 5.3 step 7. Userinfo fetch failure is non-fatal: the verified
+	// id_token alone is enough to proceed.
+	merged := make(map[string]any, len(idClaims))
+	for k, v := range idClaims {
+		merged[k] = v
+	}
+	if ui, err := prov.Inner().UserInfo(ctx, oauth2.StaticTokenSource(tok)); err == nil {
+		var uClaims map[string]any
+		if err := ui.Claims(&uClaims); err == nil {
+			for k, v := range uClaims {
+				merged[k] = v
+			}
+		}
+	}
+
+	if cfg.EmailVerifiedRequired {
+		if v, ok := merged["email_verified"].(bool); !ok || !v {
+			return nil, status.Error(codes.PermissionDenied, "email not verified")
+		}
+	}
+
+	if err := claims.EvaluateFilters(merged, cfg.ClaimFilters); err != nil {
+		return nil, status.Error(codes.PermissionDenied, "claim filter rejected")
+	}
+
+	sub, _ := merged["sub"].(string)
+	email, _ := merged["email"].(string)
+	name, _ := merged["name"].(string)
+	if name == "" {
+		first, _ := merged["given_name"].(string)
+		last, _ := merged["family_name"].(string)
+		switch {
+		case first != "" && last != "":
+			name = first + " " + last
+		case first != "":
+			name = first
+		case last != "":
+			name = last
+		default:
+			name = email
+		}
+	}
+
+	cs, err := structpb.NewStruct(merged)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "claims structpb: %v", err)
+	}
+	return &pluginv1.AuthenticateResponse{
+		ExternalSubject: sub,
+		DisplayName:     name,
+		Email:           email,
+		Claims:          cs,
+	}, nil
+}
+
+// randB64 returns n random bytes encoded as unpadded base64url.
+func randB64(n int) string {
+	b := make([]byte, n)
+	_, _ = rand.Read(b)
+	return base64.RawURLEncoding.EncodeToString(b)
+}
+
+// pkceS256 returns the S256 PKCE challenge derived from verifier.
+func pkceS256(verifier string) string {
+	sum := sha256.Sum256([]byte(verifier))
+	return base64.RawURLEncoding.EncodeToString(sum[:])
+}
