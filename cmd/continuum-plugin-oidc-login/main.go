@@ -5,12 +5,14 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	_ "embed"
 	"encoding/hex"
 	"fmt"
 	"os"
 	goruntime "runtime"
+	"sync/atomic"
 
 	"github.com/hashicorp/go-hclog"
 
@@ -18,7 +20,9 @@ import (
 	publicmanifest "github.com/ContinuumApp/continuum-plugin-sdk/pkg/pluginsdk/manifest"
 	sdkruntime "github.com/ContinuumApp/continuum-plugin-sdk/pkg/pluginsdk/runtime"
 
+	pluginauth "github.com/ContinuumApp/continuum-plugin-oidc-login/internal/auth"
 	"github.com/ContinuumApp/continuum-plugin-oidc-login/internal/httproutes"
+	pluginoidc "github.com/ContinuumApp/continuum-plugin-oidc-login/internal/oidc"
 	pluginrt "github.com/ContinuumApp/continuum-plugin-oidc-login/internal/runtime"
 	"github.com/ContinuumApp/continuum-plugin-oidc-login/internal/server"
 )
@@ -37,7 +41,36 @@ func main() {
 
 	httpSrv := httproutes.NewServer()
 
+	// Live config + provider live behind atomic pointers. Capability handlers
+	// read them per-RPC; Configure swaps them atomically.
+	var (
+		cfgPtr  atomic.Pointer[pluginrt.Config]
+		provPtr atomic.Pointer[pluginoidc.Provider]
+	)
+
+	authSrv := pluginauth.NewServer(
+		func() pluginrt.Config {
+			if p := cfgPtr.Load(); p != nil {
+				return *p
+			}
+			return pluginrt.Config{}
+		},
+		func() *pluginoidc.Provider { return provPtr.Load() },
+	)
+
 	rt := pluginrt.New(manifest, func(cfg pluginrt.Config) error {
+		prov, err := pluginoidc.NewProvider(context.Background(), pluginoidc.NewArgs{
+			IssuerURL:    cfg.IssuerURL,
+			ClientID:     cfg.ClientID,
+			ClientSecret: cfg.ClientSecret,
+			Scopes:       cfg.Scopes,
+		})
+		if err != nil {
+			return fmt.Errorf("oidc provider: %w", err)
+		}
+		cfgPtr.Store(&cfg)
+		provPtr.Store(prov)
+
 		srv := server.New(server.Deps{})
 		httpSrv.SetHandler(srv.Handler())
 		logger.Info("configured", "issuer_url", cfg.IssuerURL, "display_name", cfg.DisplayName)
@@ -47,8 +80,9 @@ func main() {
 	sdkruntime.Serve(sdkruntime.ServeConfig{
 		Logger: logger,
 		Servers: sdkruntime.CapabilityServers{
-			Runtime:    rt,
-			HttpRoutes: httpSrv,
+			Runtime:      rt,
+			HttpRoutes:   httpSrv,
+			AuthProvider: authSrv,
 		},
 	})
 }
