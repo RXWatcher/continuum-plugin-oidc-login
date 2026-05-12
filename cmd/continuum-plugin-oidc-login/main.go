@@ -20,12 +20,14 @@ import (
 	publicmanifest "github.com/ContinuumApp/continuum-plugin-sdk/pkg/pluginsdk/manifest"
 	sdkruntime "github.com/ContinuumApp/continuum-plugin-sdk/pkg/pluginsdk/runtime"
 
+	"github.com/ContinuumApp/continuum-plugin-oidc-login/cmd/continuum-plugin-oidc-login/assets"
 	pluginadmin "github.com/ContinuumApp/continuum-plugin-oidc-login/internal/admin"
 	pluginauth "github.com/ContinuumApp/continuum-plugin-oidc-login/internal/auth"
 	"github.com/ContinuumApp/continuum-plugin-oidc-login/internal/httproutes"
 	pluginoidc "github.com/ContinuumApp/continuum-plugin-oidc-login/internal/oidc"
 	pluginrt "github.com/ContinuumApp/continuum-plugin-oidc-login/internal/runtime"
 	"github.com/ContinuumApp/continuum-plugin-oidc-login/internal/server"
+	"github.com/ContinuumApp/continuum-plugin-oidc-login/web"
 )
 
 //go:embed manifest.json
@@ -82,7 +84,11 @@ func main() {
 			ProviderFn: func() *pluginoidc.Provider { return provPtr.Load() },
 		})
 
-		srv := server.New(server.Deps{AdminHandler: adminSrv.Handler()})
+		srv := server.New(server.Deps{
+			AdminHandler: adminSrv.Handler(),
+			WebFS:        web.FS(),
+			AssetsFS:     assets.FS(),
+		})
 		httpSrv.SetHandler(srv.Handler())
 		logger.Info("configured", "issuer_url", cfg.IssuerURL, "display_name", cfg.DisplayName)
 		return nil
