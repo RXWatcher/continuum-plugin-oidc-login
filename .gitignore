@@ -4,3 +4,5 @@
 .envrc
 node_modules/
 web/dist/
+web/tsconfig.tsbuildinfo
+web/tsconfig.node.tsbuildinfo
