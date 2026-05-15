@@ -126,6 +126,58 @@ func TestLoadConfig_AllowedIconAccepted(t *testing.T) {
 	}
 }
 
+func TestValidateClaimPath(t *testing.T) {
+	valid := []string{
+		"groups",
+		"email_verified",
+		"realm_access.roles",
+		"a.b.c",
+		"_underscore",
+		"resource-access.continuum.roles",
+	}
+	for _, p := range valid {
+		if err := pluginrt.ValidateClaimPath(p); err != nil {
+			t.Errorf("ValidateClaimPath(%q) unexpected err: %v", p, err)
+		}
+	}
+	invalid := []string{
+		"",          // empty
+		".",         // empty segment
+		"a.",        // trailing empty
+		".a",        // leading empty
+		"a..b",      // empty middle segment
+		"1groups",   // leading digit
+		"a b",       // whitespace
+		"groups[0]", // bracket indexing
+		"foo$",      // dollar sign
+		"a.b\"c",    // quote
+	}
+	for _, p := range invalid {
+		if err := pluginrt.ValidateClaimPath(p); err == nil {
+			t.Errorf("ValidateClaimPath(%q) expected error, got nil", p)
+		}
+	}
+}
+
+func TestLoadConfig_RejectsBadClaimPath(t *testing.T) {
+	filters, _ := structpb.NewList([]any{
+		map[string]any{"claim_path": "realm_access..roles", "operator": "contains", "value": "x"},
+	})
+	v, _ := structpb.NewStruct(map[string]any{"value": filters.AsSlice()})
+	_, err := pluginrt.LoadConfig([]*pluginv1.ConfigEntry{
+		entry("issuer_url", "https://idp"),
+		entry("client_id", "c"),
+		entry("client_secret", "s"),
+		{Key: "claim_filters", Value: v},
+	})
+	if err == nil {
+		t.Fatal("expected claim_path rejection")
+	}
+	if !strings.Contains(err.Error(), "claim_path") {
+		t.Errorf("error should mention claim_path, got: %v", err)
+	}
+}
+
 func TestLoadConfig_FiltersAndMappingParse(t *testing.T) {
 	filters, _ := structpb.NewList([]any{
 		map[string]any{"claim_path": "groups", "operator": "contains", "value": "continuum-users"},

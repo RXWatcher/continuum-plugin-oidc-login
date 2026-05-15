@@ -191,6 +191,89 @@ func TestExchangeCode_NonceMismatch_Rejects(t *testing.T) {
 	}
 }
 
+func TestExchangeCode_StateMismatch_Rejects(t *testing.T) {
+	idp := oidctest.NewIdP(t, "client-1")
+	cfg := pluginrt.Config{ClientID: "client-1", ClientSecret: "s"}
+	s := setupServer(t, cfg, idp)
+
+	nonce := "n"
+	code, _ := idp.IssueCode(t,
+		map[string]any{"sub": "u", "nonce": nonce, "email": "u@x.com", "email_verified": true},
+		map[string]any{"sub": "u", "email": "u@x.com"},
+		"access-tok-12345678",
+	)
+	// provider_state remembers the state we issued; the callback supplies a
+	// different one (forged or buggy host). Plugin must reject Unauthenticated.
+	pState, _ := structpb.NewStruct(map[string]any{
+		"pkce_verifier": "v",
+		"nonce":         nonce,
+		"state":         "issued-state-abc",
+	})
+	_, err := s.ExchangeCode(context.Background(), &pluginv1.ExchangeCodeRequest{
+		Code: code, State: "different-state-xyz", RedirectUri: "/cb", ProviderState: pState,
+	})
+	if err == nil {
+		t.Fatal("expected state mismatch error")
+	}
+	if status.Code(err) != codes.Unauthenticated {
+		t.Errorf("code = %v, want Unauthenticated", status.Code(err))
+	}
+}
+
+func TestExchangeCode_StateMatch_Passes(t *testing.T) {
+	idp := oidctest.NewIdP(t, "client-1")
+	cfg := pluginrt.Config{ClientID: "client-1", ClientSecret: "s"}
+	s := setupServer(t, cfg, idp)
+
+	nonce := "n"
+	code, _ := idp.IssueCode(t,
+		map[string]any{"sub": "u", "nonce": nonce, "email": "u@x.com", "email_verified": true, "name": "User"},
+		map[string]any{"sub": "u", "email": "u@x.com", "name": "User"},
+		"access-tok-12345678",
+	)
+	pState, _ := structpb.NewStruct(map[string]any{
+		"pkce_verifier": "v",
+		"nonce":         nonce,
+		"state":         "the-state",
+	})
+	resp, err := s.ExchangeCode(context.Background(), &pluginv1.ExchangeCodeRequest{
+		Code: code, State: "the-state", RedirectUri: "/cb", ProviderState: pState,
+	})
+	if err != nil {
+		t.Fatalf("ExchangeCode: %v", err)
+	}
+	if resp.GetExternalSubject() != "u" {
+		t.Errorf("external_subject = %q, want u", resp.GetExternalSubject())
+	}
+}
+
+// TestExchangeCode_NoStateInProviderState_SkipsCheck preserves backwards
+// compatibility with older InitAuthorize callers that didn't stash state.
+// The host is then responsible for state validation; the plugin doesn't
+// fail-closed in that case.
+func TestExchangeCode_NoStateInProviderState_SkipsCheck(t *testing.T) {
+	idp := oidctest.NewIdP(t, "client-1")
+	cfg := pluginrt.Config{ClientID: "client-1", ClientSecret: "s"}
+	s := setupServer(t, cfg, idp)
+
+	nonce := "n"
+	code, _ := idp.IssueCode(t,
+		map[string]any{"sub": "u", "nonce": nonce, "email": "u@x.com", "email_verified": true, "name": "User"},
+		map[string]any{"sub": "u", "email": "u@x.com", "name": "User"},
+		"access-tok-12345678",
+	)
+	pState, _ := structpb.NewStruct(map[string]any{
+		"pkce_verifier": "v",
+		"nonce":         nonce,
+		// no "state" key — older shape
+	})
+	if _, err := s.ExchangeCode(context.Background(), &pluginv1.ExchangeCodeRequest{
+		Code: code, State: "whatever", RedirectUri: "/cb", ProviderState: pState,
+	}); err != nil {
+		t.Fatalf("ExchangeCode (no stashed state) should pass: %v", err)
+	}
+}
+
 func TestExchangeCode_EmailVerifiedRequired_RejectsUnverified(t *testing.T) {
 	idp := oidctest.NewIdP(t, "client-1")
 	cfg := pluginrt.Config{ClientID: "client-1", ClientSecret: "s", EmailVerifiedRequired: true}

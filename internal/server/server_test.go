@@ -28,6 +28,26 @@ func TestHealthOK(t *testing.T) {
 	}
 }
 
+func TestLogoutStub(t *testing.T) {
+	s := server.New(server.Deps{})
+	r := httptest.NewRequest("POST", "/api/v1/logout", nil)
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("code = %d", w.Code)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if body["scope"] != "local" {
+		t.Errorf("scope = %v", body["scope"])
+	}
+	if !strings.Contains(strings.ToLower(body["message"].(string)), "v2") {
+		t.Errorf("message should mention v2 limitation: %v", body["message"])
+	}
+}
+
 func TestAssetsServesSVG(t *testing.T) {
 	fsys := fstest.MapFS{
 		"authentik.svg": &fstest.MapFile{Data: []byte("<svg></svg>")},

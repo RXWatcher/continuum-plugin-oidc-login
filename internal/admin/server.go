@@ -19,6 +19,12 @@ import (
 	pluginrt "github.com/ContinuumApp/continuum-plugin-oidc-login/internal/runtime"
 )
 
+// maxResponseBytes caps outbound discovery/JWKS response bodies. Both
+// well-formed OIDC discovery documents and JWKS payloads are well under
+// this; the cap defends against memory exhaustion if a misbehaving or
+// hostile IdP returns a runaway body.
+const maxResponseBytes = 10 << 20 // 10 MiB
+
 // Deps wires the closures the handlers read at request time. ConfigFn and
 // ProviderFn are called per-request so the latest Configure values are
 // always observed.
@@ -115,7 +121,11 @@ func (s *Server) handleDiscovery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
 	if resp.StatusCode >= 400 {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"ok":    false,

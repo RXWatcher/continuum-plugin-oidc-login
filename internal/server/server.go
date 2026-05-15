@@ -2,6 +2,7 @@
 // http_routes.v1 capability exposes:
 //
 //   - /api/v1/health           public health probe
+//   - /api/v1/logout           public stub (RP-initiated logout is v2)
 //   - /api/v1/admin/*          admin endpoints (gated by the admin handler)
 //   - /assets/*                bundled icon SVGs (public)
 //   - /admin, /admin/*         embedded React SPA (theme-injected HTML)
@@ -46,6 +47,7 @@ func (s *Server) Handler() http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.Recoverer)
 	r.Get("/api/v1/health", s.handleHealth)
+	r.Post("/api/v1/logout", s.handleLogout)
 	if s.deps.AdminHandler != nil {
 		r.Mount("/", s.deps.AdminHandler)
 	}
@@ -62,6 +64,20 @@ func (s *Server) Handler() http.Handler {
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
+}
+
+// handleLogout is a documentation surface: the host owns session lifecycle,
+// so this plugin only acknowledges the request. RP-initiated logout against
+// the upstream IdP is a v2 concern; in multi-IdP setups callers were getting
+// confused expecting this endpoint to invalidate IdP sessions, so we return
+// a clear 200 explaining what it does (and doesn't) do.
+func (s *Server) handleLogout(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"ok":      true,
+		"scope":   "local",
+		"message": "local logout only; RP-initiated logout is v2",
+	})
 }
 
 // handleAssets serves bundled icon SVGs from AssetsFS. The runtime.AllowedIcons

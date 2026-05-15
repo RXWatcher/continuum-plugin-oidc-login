@@ -9,6 +9,27 @@ type DecodeResult = {
   error?: string;
 };
 
+// formatExpiry turns a JWT `exp` claim (numeric seconds since epoch) into a
+// short human-readable countdown. Returns null if exp is missing/unparseable.
+// No new dependency; mirrors the conservative formatting we use elsewhere.
+function formatExpiry(exp: unknown): {
+  label: string;
+  expired: boolean;
+} | null {
+  const n = typeof exp === "number" ? exp : Number(exp);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  const diffSec = Math.round(n - Date.now() / 1000);
+  const abs = Math.abs(diffSec);
+  const m = Math.floor(abs / 60);
+  const s = abs % 60;
+  const parts =
+    abs >= 60 ? `${m}m ${s}s` : `${s}s`;
+  if (diffSec < 0) {
+    return { label: `expired ${parts} ago`, expired: true };
+  }
+  return { label: `expires in ${parts}`, expired: false };
+}
+
 // DiagnosticsPanel decodes a pasted id_token against the live JWKS. The
 // per-claim "Filter" / "Role" buttons prefill a new row in the editors
 // above via the onUseAsFilter / onUseAsRoleMapping callbacks.
@@ -62,6 +83,21 @@ export default function DiagnosticsPanel({
               ? "Signature verified"
               : `Verification failed: ${result.error || "unknown"}`}
           </div>
+          {result.claims &&
+            (() => {
+              const exp = formatExpiry(result.claims.exp);
+              if (!exp) return null;
+              return (
+                <div
+                  className={
+                    "mt-1 text-xs " +
+                    (exp.expired ? "text-destructive" : "text-muted-foreground")
+                  }
+                >
+                  Token {exp.label}
+                </div>
+              );
+            })()}
           {result.claims && (
             <div className="mt-3 space-y-2">
               <details>

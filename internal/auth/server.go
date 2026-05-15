@@ -10,6 +10,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
 
 	"golang.org/x/oauth2"
@@ -59,22 +60,35 @@ func (s *Server) InitAuthorize(_ context.Context, req *pluginv1.InitAuthorizeReq
 		return nil, status.Error(codes.FailedPrecondition, "plugin not configured")
 	}
 
-	verifier := randB64(48)
+	verifier, err := randB64(48)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "entropy: %v", err)
+	}
 	challenge := pkceS256(verifier)
-	nonce := randB64(32)
+	nonce, err := randB64(32)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "entropy: %v", err)
+	}
 
 	cfg := prov.OAuth2Config()
 	cfg.RedirectURL = req.GetRedirectUri()
 
-	authURL := cfg.AuthCodeURL(req.GetState(),
+	reqState := req.GetState()
+	authURL := cfg.AuthCodeURL(reqState,
 		oauth2.SetAuthURLParam("nonce", nonce),
 		oauth2.SetAuthURLParam("code_challenge", challenge),
 		oauth2.SetAuthURLParam("code_challenge_method", "S256"),
 	)
 
+	// Stash the issued state alongside pkce_verifier + nonce so ExchangeCode
+	// can verify the callback's state matches what was sent to the IdP.
+	// This is defense-in-depth: the host is also expected to validate state
+	// at the callback URL before invoking ExchangeCode, but a plugin-side
+	// check protects users when the host's check is buggy or skipped.
 	pState, err := structpb.NewStruct(map[string]any{
 		"pkce_verifier": verifier,
 		"nonce":         nonce,
+		"state":         reqState,
 	})
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "structpb: %v", err)
@@ -100,8 +114,21 @@ func (s *Server) ExchangeCode(ctx context.Context, req *pluginv1.ExchangeCodeReq
 	pState := req.GetProviderState().AsMap()
 	verifier, _ := pState["pkce_verifier"].(string)
 	expectedNonce, _ := pState["nonce"].(string)
+	expectedState, _ := pState["state"].(string)
 	if verifier == "" || expectedNonce == "" {
 		return nil, status.Error(codes.InvalidArgument, "missing pkce_verifier or nonce in provider_state")
+	}
+
+	// CSRF defense: the callback's state must match the state we issued
+	// during InitAuthorize. Constant-time comparison so timing leaks can't
+	// be used to recover state byte-by-byte. When InitAuthorize was called
+	// with an empty state (older host builds), we skip this check — the
+	// host is then responsible for state validation upstream.
+	if expectedState != "" {
+		callbackState := req.GetState()
+		if subtle.ConstantTimeCompare([]byte(callbackState), []byte(expectedState)) != 1 {
+			return nil, status.Error(codes.Unauthenticated, "state mismatch")
+		}
 	}
 
 	oc := prov.OAuth2Config()
@@ -187,11 +214,17 @@ func (s *Server) ExchangeCode(ctx context.Context, req *pluginv1.ExchangeCodeReq
 	}, nil
 }
 
-// randB64 returns n random bytes encoded as unpadded base64url.
-func randB64(n int) string {
+// randB64 returns n random bytes encoded as unpadded base64url. An entropy
+// read failure is treated as fatal for the call: callers (InitAuthorize)
+// must surface the error rather than mint zero-byte tokens. PKCE verifiers
+// and nonces are security-critical; a silent fallback would produce
+// predictable, brute-forceable values.
+func randB64(n int) (string, error) {
 	b := make([]byte, n)
-	_, _ = rand.Read(b)
-	return base64.RawURLEncoding.EncodeToString(b)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
 // pkceS256 returns the S256 PKCE challenge derived from verifier.

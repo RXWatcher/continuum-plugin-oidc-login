@@ -145,13 +145,19 @@ func LoadConfig(entries []*pluginv1.ConfigEntry) (Config, error) {
 			}
 		case "claim_filters":
 			raw, err := json.Marshal(val)
-			if err == nil {
-				_ = json.Unmarshal(raw, &cfg.ClaimFilters)
+			if err != nil {
+				return Config{}, fmt.Errorf("claim_filters: marshal value: %w", err)
+			}
+			if err := json.Unmarshal(raw, &cfg.ClaimFilters); err != nil {
+				return Config{}, fmt.Errorf("claim_filters: invalid JSON shape: %w", err)
 			}
 		case "claim_role_mapping":
 			raw, err := json.Marshal(val)
-			if err == nil {
-				_ = json.Unmarshal(raw, &cfg.ClaimRoleMapping)
+			if err != nil {
+				return Config{}, fmt.Errorf("claim_role_mapping: marshal value: %w", err)
+			}
+			if err := json.Unmarshal(raw, &cfg.ClaimRoleMapping); err != nil {
+				return Config{}, fmt.Errorf("claim_role_mapping: invalid JSON shape: %w", err)
 			}
 		case "email_verified_required":
 			if b, ok := val.(bool); ok {
@@ -193,6 +199,9 @@ func validate(cfg Config) error {
 		if f.ClaimPath == "" {
 			return fmt.Errorf("claim_filters[%d]: claim_path required", i)
 		}
+		if err := ValidateClaimPath(f.ClaimPath); err != nil {
+			return fmt.Errorf("claim_filters[%d]: %w", i, err)
+		}
 		if f.Operator == "regex" {
 			if _, err := regexp.Compile(stringOf(f.Value)); err != nil {
 				return fmt.Errorf("claim_filters[%d]: invalid regex: %w", i, err)
@@ -206,6 +215,9 @@ func validate(cfg Config) error {
 		if r.ClaimPath == "" {
 			return fmt.Errorf("claim_role_mapping[%d]: claim_path required", i)
 		}
+		if err := ValidateClaimPath(r.ClaimPath); err != nil {
+			return fmt.Errorf("claim_role_mapping[%d]: %w", i, err)
+		}
 		if r.Role != "user" && r.Role != "admin" {
 			return fmt.Errorf("claim_role_mapping[%d]: role must be user or admin (got %q)", i, r.Role)
 		}
@@ -213,6 +225,30 @@ func validate(cfg Config) error {
 			if _, err := regexp.Compile(stringOf(r.Value)); err != nil {
 				return fmt.Errorf("claim_role_mapping[%d]: invalid regex: %w", i, err)
 			}
+		}
+	}
+	return nil
+}
+
+// claimPathSegment matches a single dotted segment: identifier-ish chars only.
+// Mirrors the conservative shape of JWT claim names (no whitespace, no quoting,
+// no bracket indexing). Hyphens are permitted because some IdPs emit kebab-case
+// custom claims; leading char must be a letter or underscore.
+var claimPathSegment = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_-]*$`)
+
+// ValidateClaimPath returns nil iff path is a non-empty dot-separated chain of
+// identifier-shaped segments (e.g. "groups", "realm_access.roles"). It refuses
+// empty segments, bracket/quote/whitespace chars, and leading-digit segments.
+func ValidateClaimPath(path string) error {
+	if path == "" {
+		return errors.New("claim_path required")
+	}
+	for _, seg := range strings.Split(path, ".") {
+		if seg == "" {
+			return fmt.Errorf("claim_path %q has empty segment", path)
+		}
+		if !claimPathSegment.MatchString(seg) {
+			return fmt.Errorf("claim_path %q: segment %q must match [A-Za-z_][A-Za-z0-9_-]*", path, seg)
 		}
 	}
 	return nil
