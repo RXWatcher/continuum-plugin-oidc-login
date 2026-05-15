@@ -21,7 +21,7 @@
   ],
   "http_routes": [
     {"id": "assets", "method": "GET", "path": "/assets/*", "access": "public"},
-    {"id": "admin_html", "method": "GET", "path": "/admin", "access": "authenticated"},
+    {"id": "admin_html", "method": "GET", "path": "/admin", "access": "authenticated", "navigable": true, "navigation_label": "OIDC Login", "navigation_kind": "admin"},
     {"id": "admin_html_sub", "method": "GET", "path": "/admin/*", "access": "authenticated"},
     {"id": "admin_api", "method": "*", "path": "/api/v1/admin/*", "access": "authenticated"},
     {"id": "health", "method": "GET", "path": "/api/v1/health", "access": "public"}
