@@ -183,6 +183,10 @@ func (s *Server) ExchangeCode(ctx context.Context, req *pluginv1.ExchangeCodeReq
 	if err := claims.EvaluateFilters(merged, cfg.ClaimFilters); err != nil {
 		return nil, status.Error(codes.PermissionDenied, "claim filter rejected")
 	}
+	merged["continuum_role"] = claims.ResolveRole(merged, cfg.ClaimRoleMapping)
+	if cfg.LinkByEmail {
+		merged["continuum_link_by_email"] = true
+	}
 
 	sub, _ := merged["sub"].(string)
 	email, _ := merged["email"].(string)
