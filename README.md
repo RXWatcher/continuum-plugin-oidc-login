@@ -1,80 +1,83 @@
-# continuum-plugin-oidc-login
+# OIDC Login for Continuum
 
-Generic OAuth2 / OIDC authentication for Continuum. **Multi-instance** — install once per identity provider (Authentik, Keycloak, Auth0, Okta, Google, Azure AD, GitLab, etc.). Each install configures one IdP independently.
+`continuum.oidc-login` adds generic OAuth2/OIDC sign-in to Continuum. It is a
+multi-instance auth provider: install it once per identity provider, such as
+Authentik, Keycloak, Auth0, Okta, Google, Microsoft Entra ID, or GitLab.
 
-Implements OAuth2 + PKCE with discovery and JWKS-verified id_tokens. Includes an admin SPA at `/admin` for visual editors of claim filters and role mapping, plus a Diagnostics panel for decoding pasted id_tokens against the live JWKS.
+Use this plugin when your identity provider supports standard OIDC discovery
+and JWKS-verified ID tokens. Use `continuum.whmcs-login` when your user source
+is WHMCS billing.
 
-Companion plugin to [`continuum.whmcs-login`](../continuum-plugin-whmcs-login/) — pick this one when your IdP speaks standard OIDC.
+## Features
 
-## Capabilities
-
-| Capability | Notes |
-|---|---|
-| `auth_provider.v1` (`oidc`) | OAuth2 init + code exchange. |
-| `http_routes.v1` (`spa`) | Bundled admin SPA at `/admin`, plus `/assets/*`. |
-
-The redirect URI to register at each IdP is `https://<continuum-host>/api/v1/auth/oauth/<install-id>/callback`.
+- OAuth2 authorization-code flow with PKCE.
+- OIDC discovery via `<issuer>/.well-known/openid-configuration`.
+- JWKS verification for ID tokens.
+- Per-install display name and icon.
+- Claim filters to allow or deny sign-in.
+- Claim role mapping to assign Continuum roles.
+- Optional email verification enforcement.
+- Optional email-based account linking.
+- Admin SPA for configuration, discovery testing, claim filter editing, role
+  mapping, and token diagnostics.
 
 ## Configuration
 
 | Key | Required | Description |
 |---|---|---|
-| `issuer_url` | yes | IdP base URL; discovery resolves `<issuer>/.well-known/openid-configuration`. |
-| `client_id` | yes | OAuth client ID issued by the IdP. |
+| `issuer_url` | yes | OIDC issuer URL. |
+| `client_id` | yes | OAuth client ID issued by the identity provider. |
 | `client_secret` | yes | OAuth client secret. |
-| `scopes` | no | Space-separated OIDC scopes (default `openid profile email`). |
-| `display_name` | no | Login-button label (default "Sign in with OIDC"). Each install picks its own. |
-| `icon_url_path` | no | Bundled SVG filename. One of: `authentik.svg`, `keycloak.svg`, `auth0.svg`, `okta.svg`, `microsoft.svg`, `google.svg`, `gitlab.svg`, `generic-key.svg`. |
-| `claim_filters` | no | JSON array of `{claim_path, operator, value}` rules. **All** must pass for sign-in. |
-| `claim_role_mapping` | no | JSON array of `{claim_path, operator, value, role}` rules. First match wins. |
-| `email_verified_required` | no | Reject id_tokens with `email_verified=false` (default `true`). |
-| `link_by_email` | no | Auto-link to existing user on email collision (default `false`; safer confirmation flow otherwise). |
+| `scopes` | no | Space-separated scopes. Defaults to `openid profile email`. |
+| `display_name` | no | Login-button label for this install. |
+| `icon_url_path` | no | Bundled icon filename managed by the admin SPA. |
+| `claim_filters` | no | JSON array of rules that must pass before sign-in is allowed. |
+| `claim_role_mapping` | no | JSON array of rules that map claims to Continuum roles. |
+| `email_verified_required` | no | Reject ID tokens with `email_verified=false`. Defaults to true. |
+| `link_by_email` | no | Auto-link to an existing Continuum user when email collides. Defaults to false. |
 
-## Claim filter / role mapping operators
+Redirect URI to register at the identity provider:
 
-- `equals` — JSON-typed deep equality.
-- `contains` — array element membership OR string substring.
-- `starts_with` — string prefix.
-- `regex` — RE2 match (any element for array claims).
+```text
+https://<continuum-host>/api/v1/auth/oauth/<install-id>/callback
+```
 
-`claim_path` supports dot-notation for nested objects (e.g. `realm_access.roles`).
+## Claim Rules
 
-## Example — Authentik with group gating + admin elevation
+Claim paths use dot notation for nested objects, for example
+`realm_access.roles`. Supported operators:
 
-```jsonc
+- `equals`
+- `contains`
+- `starts_with`
+- `regex`
+
+Example group gate and admin mapping:
+
+```json
 {
   "claim_filters": [
-    { "claim_path": "groups", "operator": "contains", "value": "continuum-users" }
+    {"claim_path": "groups", "operator": "contains", "value": "continuum-users"}
   ],
   "claim_role_mapping": [
-    { "claim_path": "groups", "operator": "contains", "value": "continuum-admins", "role": "admin" }
+    {"claim_path": "groups", "operator": "contains", "value": "continuum-admins", "role": "admin"}
   ]
 }
 ```
 
-## Dependencies
+## Setup
 
-- No Postgres schema (stateless).
-- Outbound HTTPS to the configured IdP's discovery + JWKS endpoints.
+1. Install the plugin and note the assigned installation ID.
+2. Register an OAuth client in the identity provider using the redirect URI
+   above.
+3. Open the plugin admin page in Continuum.
+4. Enter issuer URL, client ID, client secret, and scopes.
+5. Test discovery and configure claim filters or role mapping as needed.
 
-## Install (per IdP)
-
-1. `make build`, upload via `POST /api/v1/admin/plugins/uploads`.
-2. Note the assigned `install_id`. The redirect URI to register at the IdP is `https://<continuum-host>/api/v1/auth/oauth/<install-id>/callback`.
-3. At the IdP admin UI, register an OAuth client (type: confidential web). Authentik / Keycloak / Okta / Auth0 / Microsoft / Google / GitLab — the discovery doc and JWKS work out of the box.
-4. Open the plugin's `/admin` SPA, paste `issuer_url` + credentials, click **Test discovery**, then **Save**.
-5. Add claim filters / role mapping rules as needed; the Diagnostics panel lets you paste an id_token and click claim names to auto-populate them.
-
-## Build & test
+## Build And Test
 
 ```bash
-make build           # builds web/dist then the Go binary
-go test ./...        # plugin Go tests
-cd web && pnpm run test --run    # SPA component tests
+make build
+go test ./...
+cd web && pnpm run test --run
 ```
-
-The binary embeds the SPA bundle and 8 placeholder icon SVGs.
-
-## Status
-
-v0.1.0. Functional.
