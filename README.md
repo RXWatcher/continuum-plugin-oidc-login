@@ -8,6 +8,10 @@ Use this plugin when your identity provider supports standard OIDC discovery
 and JWKS-verified ID tokens. Use `continuum.whmcs-login` when your user source
 is WHMCS billing.
 
+## Detailed Operations Docs
+
+- [Setup, debugging, and communication flows](docs/setup-debug-flows.md)
+
 ## Features
 
 - OAuth2 authorization-code flow with PKCE.
