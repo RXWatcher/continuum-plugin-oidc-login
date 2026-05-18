@@ -38,7 +38,7 @@
       "id": "admin_html",
       "method": "GET",
       "path": "/admin",
-      "access": "authenticated",
+      "access": "admin",
       "navigable": true,
       "navigation_label": "OIDC Login",
       "navigation_kind": "admin"
@@ -47,13 +47,13 @@
       "id": "admin_html_sub",
       "method": "GET",
       "path": "/admin/*",
-      "access": "authenticated"
+      "access": "admin"
     },
     {
       "id": "admin_api",
       "method": "*",
       "path": "/api/v1/admin/*",
-      "access": "authenticated"
+      "access": "admin"
     },
     {
       "id": "health",
