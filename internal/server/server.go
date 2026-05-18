@@ -138,7 +138,7 @@ func (s *Server) handleSPA(w http.ResponseWriter, r *http.Request) {
 		if theme == "" {
 			theme = "dark"
 		}
-		data = rewriteAdminAssetPaths(data)
+		data = rewriteAdminAssetPaths(data, r.URL.Path)
 		if strings.Contains(string(data), `<html lang="en">`) {
 			data = []byte(strings.Replace(string(data), `<html lang="en">`, `<html lang="en" data-theme="`+theme+`">`, 1))
 		} else {
@@ -148,11 +148,19 @@ func (s *Server) handleSPA(w http.ResponseWriter, r *http.Request) {
 	writeStatic(w, rel, data)
 }
 
-func rewriteAdminAssetPaths(data []byte) []byte {
+func rewriteAdminAssetPaths(data []byte, requestPath string) []byte {
 	html := string(data)
-	html = strings.ReplaceAll(html, `src="./assets/`, `src="../assets/`)
-	html = strings.ReplaceAll(html, `href="./assets/`, `href="../assets/`)
+	prefix := adminAssetPrefix(requestPath)
+	html = strings.ReplaceAll(html, `src="./assets/`, `src="`+prefix)
+	html = strings.ReplaceAll(html, `href="./assets/`, `href="`+prefix)
 	return []byte(html)
+}
+
+func adminAssetPrefix(requestPath string) string {
+	if requestPath == "/admin" || requestPath == "/" {
+		return "assets/"
+	}
+	return "../assets/"
 }
 
 func writeStatic(w http.ResponseWriter, rel string, data []byte) {
