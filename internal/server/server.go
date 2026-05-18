@@ -108,8 +108,9 @@ func (s *Server) handleAssets(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleSPA serves the embedded React SPA. /admin and /admin/* land on
-// index.html (with data-theme injected from the host header); /admin/assets/*
-// resolves to the corresponding Vite-emitted asset.
+// index.html (with data-theme injected from the host/query theme); Vite assets
+// must resolve through /assets/* because /admin/* is admin-gated by the host
+// and browser asset requests do not carry the initial token query parameter.
 func (s *Server) handleSPA(w http.ResponseWriter, r *http.Request) {
 	var rel string
 	switch {
@@ -127,12 +128,17 @@ func (s *Server) handleSPA(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if strings.HasSuffix(rel, ".html") {
-		theme := r.Header.Get("X-Continuum-User-Theme")
+		theme := r.URL.Query().Get("theme")
+		if theme == "" {
+			theme = r.Header.Get("X-Continuum-Theme")
+		}
+		if theme == "" {
+			theme = r.Header.Get("X-Continuum-User-Theme")
+		}
 		if theme == "" {
 			theme = "dark"
 		}
-		// Inject data-theme into the <html> tag so semantic Tailwind classes
-		// pick up the right palette before the React app boots.
+		data = rewriteAdminAssetPaths(data)
 		if strings.Contains(string(data), `<html lang="en">`) {
 			data = []byte(strings.Replace(string(data), `<html lang="en">`, `<html lang="en" data-theme="`+theme+`">`, 1))
 		} else {
@@ -140,6 +146,13 @@ func (s *Server) handleSPA(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeStatic(w, rel, data)
+}
+
+func rewriteAdminAssetPaths(data []byte) []byte {
+	html := string(data)
+	html = strings.ReplaceAll(html, `src="./assets/`, `src="../assets/`)
+	html = strings.ReplaceAll(html, `href="./assets/`, `href="../assets/`)
+	return []byte(html)
 }
 
 func writeStatic(w http.ResponseWriter, rel string, data []byte) {
