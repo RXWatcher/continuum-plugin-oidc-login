@@ -44,10 +44,22 @@ func TestLoadConfig_Defaults(t *testing.T) {
 	}
 }
 
-func TestLoadConfig_RequiresIssuerClient(t *testing.T) {
-	_, err := pluginrt.LoadConfig(nil)
+func TestLoadConfig_AllowsUnconfiguredProvider(t *testing.T) {
+	cfg, err := pluginrt.LoadConfig(nil)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if cfg.ProviderConfigured() {
+		t.Fatal("empty provider settings should not be configured")
+	}
+}
+
+func TestLoadConfig_RejectsPartialProviderConfig(t *testing.T) {
+	_, err := pluginrt.LoadConfig([]*pluginv1.ConfigEntry{
+		entry("issuer_url", "https://idp.example.com"),
+	})
 	if err == nil {
-		t.Error("expected error for missing required fields")
+		t.Error("expected error for partial provider config")
 	}
 }
 

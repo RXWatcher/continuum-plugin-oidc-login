@@ -51,7 +51,7 @@ func (s *Server) Handler() http.Handler {
 	if s.deps.AdminHandler != nil {
 		r.Mount("/", s.deps.AdminHandler)
 	}
-	if s.deps.AssetsFS != nil {
+	if s.deps.AssetsFS != nil || s.deps.WebFS != nil {
 		r.Get("/assets/*", s.handleAssets)
 	}
 	if s.deps.WebFS != nil {
@@ -89,15 +89,22 @@ func (s *Server) handleAssets(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	if s.deps.WebFS != nil {
+		if data, err := fs.ReadFile(s.deps.WebFS, "assets/"+relative); err == nil {
+			writeStatic(w, "assets/"+relative, data)
+			return
+		}
+	}
+	if s.deps.AssetsFS == nil {
+		http.NotFound(w, r)
+		return
+	}
 	data, err := fs.ReadFile(s.deps.AssetsFS, relative)
 	if err != nil {
 		http.NotFound(w, r)
 		return
 	}
-	if strings.HasSuffix(relative, ".svg") {
-		w.Header().Set("Content-Type", "image/svg+xml")
-	}
-	_, _ = w.Write(data)
+	writeStatic(w, relative, data)
 }
 
 // handleSPA serves the embedded React SPA. /admin and /admin/* land on
@@ -119,22 +126,27 @@ func (s *Server) handleSPA(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	switch {
-	case strings.HasSuffix(rel, ".html"):
+	if strings.HasSuffix(rel, ".html") {
 		theme := r.Header.Get("X-Continuum-User-Theme")
 		if theme == "" {
 			theme = "dark"
 		}
 		// Inject data-theme into the <html> tag so semantic Tailwind classes
 		// pick up the right palette before the React app boots.
-		var injected string
 		if strings.Contains(string(data), `<html lang="en">`) {
-			injected = strings.Replace(string(data), `<html lang="en">`, `<html lang="en" data-theme="`+theme+`">`, 1)
+			data = []byte(strings.Replace(string(data), `<html lang="en">`, `<html lang="en" data-theme="`+theme+`">`, 1))
 		} else {
-			injected = strings.Replace(string(data), `<html`, `<html data-theme="`+theme+`"`, 1)
+			data = []byte(strings.Replace(string(data), `<html`, `<html data-theme="`+theme+`"`, 1))
 		}
+	}
+	writeStatic(w, rel, data)
+}
+
+func writeStatic(w http.ResponseWriter, rel string, data []byte) {
+	switch {
+	case strings.HasSuffix(rel, ".html"):
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = w.Write([]byte(injected))
+		_, _ = w.Write(data)
 	case strings.HasSuffix(rel, ".js"):
 		w.Header().Set("Content-Type", "application/javascript")
 		_, _ = w.Write(data)

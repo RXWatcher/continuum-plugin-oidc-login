@@ -64,6 +64,16 @@ type Config struct {
 	LinkByEmail           bool              `json:"link_by_email"`
 }
 
+// ProviderConfigured reports whether the OIDC provider has enough settings to
+// run discovery and participate in login flows.
+func (c Config) ProviderConfigured() bool {
+	return c.IssuerURL != "" && c.ClientID != "" && c.ClientSecret != ""
+}
+
+func (c Config) providerPartiallyConfigured() bool {
+	return c.IssuerURL != "" || c.ClientID != "" || c.ClientSecret != ""
+}
+
 // Server implements the plugin's Runtime service.
 type Server struct {
 	runtimedefault.Server
@@ -178,17 +188,19 @@ func LoadConfig(entries []*pluginv1.ConfigEntry) (Config, error) {
 }
 
 func validate(cfg Config) error {
-	if cfg.IssuerURL == "" {
-		return errors.New("issuer_url is required")
-	}
-	if err := validateIssuerURL(cfg.IssuerURL); err != nil {
-		return err
-	}
-	if cfg.ClientID == "" {
-		return errors.New("client_id is required")
-	}
-	if cfg.ClientSecret == "" {
-		return errors.New("client_secret is required")
+	if cfg.providerPartiallyConfigured() {
+		if cfg.IssuerURL == "" {
+			return errors.New("issuer_url is required when OIDC provider settings are present")
+		}
+		if err := validateIssuerURL(cfg.IssuerURL); err != nil {
+			return err
+		}
+		if cfg.ClientID == "" {
+			return errors.New("client_id is required when OIDC provider settings are present")
+		}
+		if cfg.ClientSecret == "" {
+			return errors.New("client_secret is required when OIDC provider settings are present")
+		}
 	}
 	if !scopeIncludesOpenID(cfg.Scopes) {
 		return errors.New("scopes must include openid")

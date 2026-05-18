@@ -62,14 +62,18 @@ func main() {
 	)
 
 	rt := pluginrt.New(manifest, func(cfg pluginrt.Config) error {
-		prov, err := pluginoidc.NewProvider(context.Background(), pluginoidc.NewArgs{
-			IssuerURL:    cfg.IssuerURL,
-			ClientID:     cfg.ClientID,
-			ClientSecret: cfg.ClientSecret,
-			Scopes:       cfg.Scopes,
-		})
-		if err != nil {
-			return fmt.Errorf("oidc provider: %w", err)
+		var prov *pluginoidc.Provider
+		if cfg.ProviderConfigured() {
+			var err error
+			prov, err = pluginoidc.NewProvider(context.Background(), pluginoidc.NewArgs{
+				IssuerURL:    cfg.IssuerURL,
+				ClientID:     cfg.ClientID,
+				ClientSecret: cfg.ClientSecret,
+				Scopes:       cfg.Scopes,
+			})
+			if err != nil {
+				return fmt.Errorf("oidc provider: %w", err)
+			}
 		}
 		cfgPtr.Store(&cfg)
 		provPtr.Store(prov)
@@ -90,7 +94,7 @@ func main() {
 			AssetsFS:     assets.FS(),
 		})
 		httpSrv.SetHandler(srv.Handler())
-		logger.Info("configured", "issuer_url", cfg.IssuerURL, "display_name", cfg.DisplayName)
+		logger.Info("configured", "issuer_url", cfg.IssuerURL, "display_name", cfg.DisplayName, "provider_configured", cfg.ProviderConfigured())
 		return nil
 	})
 

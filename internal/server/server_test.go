@@ -126,3 +126,31 @@ func TestSPAAssetsServed(t *testing.T) {
 		t.Errorf("content-type = %q", ct)
 	}
 }
+
+func TestRootAssetsServeSPAAssets(t *testing.T) {
+	fsys := fstest.MapFS{
+		"assets/index.js":  &fstest.MapFile{Data: []byte("console.log('hi')")},
+		"assets/index.css": &fstest.MapFile{Data: []byte("body{}")},
+	}
+	s := server.New(server.Deps{WebFS: fsys})
+
+	for _, tc := range []struct {
+		path        string
+		contentType string
+	}{
+		{path: "/assets/index.js", contentType: "application/javascript"},
+		{path: "/assets/index.css", contentType: "text/css"},
+	} {
+		t.Run(tc.path, func(t *testing.T) {
+			r := httptest.NewRequest("GET", tc.path, nil)
+			w := httptest.NewRecorder()
+			s.Handler().ServeHTTP(w, r)
+			if w.Code != http.StatusOK {
+				t.Fatalf("code = %d", w.Code)
+			}
+			if ct := w.Header().Get("Content-Type"); ct != tc.contentType {
+				t.Errorf("content-type = %q", ct)
+			}
+		})
+	}
+}

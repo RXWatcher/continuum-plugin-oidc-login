@@ -3,6 +3,12 @@
   "version": "1.0.0",
   "checksum": "__CHECKSUM__",
   "continuum_api_version": "v1",
+  "supported_platforms": [
+    {
+      "os": "linux",
+      "arch": "amd64"
+    }
+  ],
   "capabilities": [
     {
       "type": "auth_provider.v1",
@@ -60,16 +66,14 @@
     {
       "key": "issuer_url",
       "title": "Issuer URL",
-      "required": true,
       "description": "OIDC issuer URL, e.g. https://auth.example.com. Discovery resolves <issuer>/.well-known/openid-configuration.",
-      "json_schema": "{\"type\":\"object\",\"properties\":{\"value\":{\"type\":\"string\"}},\"required\":[\"value\"]}",
+      "json_schema": "{\"type\":\"object\",\"properties\":{\"value\":{\"type\":\"string\"}}}",
       "admin_form": {
         "fields": [
           {
             "key": "value",
             "label": "URL",
-            "control": "ADMIN_FORM_CONTROL_TEXT",
-            "required": true
+            "control": "ADMIN_FORM_CONTROL_TEXT"
           }
         ]
       }
@@ -77,15 +81,13 @@
     {
       "key": "client_id",
       "title": "Client ID",
-      "required": true,
-      "json_schema": "{\"type\":\"object\",\"properties\":{\"value\":{\"type\":\"string\"}},\"required\":[\"value\"]}",
+      "json_schema": "{\"type\":\"object\",\"properties\":{\"value\":{\"type\":\"string\"}}}",
       "admin_form": {
         "fields": [
           {
             "key": "value",
             "label": "Client ID",
-            "control": "ADMIN_FORM_CONTROL_TEXT",
-            "required": true
+            "control": "ADMIN_FORM_CONTROL_TEXT"
           }
         ]
       }
@@ -93,15 +95,13 @@
     {
       "key": "client_secret",
       "title": "Client secret",
-      "required": true,
-      "json_schema": "{\"type\":\"object\",\"properties\":{\"value\":{\"type\":\"string\"}},\"required\":[\"value\"]}",
+      "json_schema": "{\"type\":\"object\",\"properties\":{\"value\":{\"type\":\"string\"}}}",
       "admin_form": {
         "fields": [
           {
             "key": "value",
             "label": "Client secret",
             "control": "ADMIN_FORM_CONTROL_PASSWORD",
-            "required": true,
             "secret": true
           }
         ]
