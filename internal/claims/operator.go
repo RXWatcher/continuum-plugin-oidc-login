@@ -2,6 +2,7 @@ package claims
 
 import (
 	"fmt"
+	"reflect"
 	"regexp"
 	"strings"
 )
@@ -23,13 +24,16 @@ func Eval(operator string, claimValue, ruleValue any) bool {
 	return false
 }
 
-// equals does deep JSON-typed equality. Arrays don't equal non-arrays — use
-// contains instead.
+// equals does JSON-typed equality. Arrays deliberately don't equal anything
+// here; use contains for membership checks.
 func equals(a, b any) bool {
 	if _, ok := a.([]any); ok {
 		return false
 	}
-	return a == b
+	if _, ok := b.([]any); ok {
+		return false
+	}
+	return reflect.DeepEqual(a, b)
 }
 
 // contains has two modes:
@@ -41,7 +45,7 @@ func contains(claim, value any) bool {
 	switch v := claim.(type) {
 	case []any:
 		for _, e := range v {
-			if e == value {
+			if reflect.DeepEqual(e, value) {
 				return true
 			}
 		}

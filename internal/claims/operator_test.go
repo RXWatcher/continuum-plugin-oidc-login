@@ -18,6 +18,7 @@ func TestEquals(t *testing.T) {
 		{float64(1), float64(1), true},
 		{float64(1), float64(2), false},
 		{[]any{"a"}, "a", false}, // arrays don't equal strings — use contains
+		{map[string]any{"nested": "value"}, map[string]any{"nested": "value"}, true},
 	}
 	for i, c := range cases {
 		if got := claims.Eval("equals", c.claim, c.value); got != c.want {
@@ -33,6 +34,7 @@ func TestContains(t *testing.T) {
 	}{
 		{[]any{"a", "b"}, "a", true},
 		{[]any{"a", "b"}, "c", false},
+		{[]any{map[string]any{"id": "a"}, map[string]any{"id": "b"}}, map[string]any{"id": "b"}, true},
 		{"abcdef", "cd", true},
 		{"abcdef", "xy", false},
 		{nil, "x", false},

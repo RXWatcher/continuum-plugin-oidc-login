@@ -165,9 +165,16 @@ func (s *Server) ExchangeCode(ctx context.Context, req *pluginv1.ExchangeCodeReq
 	for k, v := range idClaims {
 		merged[k] = v
 	}
+	idSub, _ := idClaims["sub"].(string)
+	if idSub == "" {
+		return nil, status.Error(codes.Unauthenticated, "id_token missing subject")
+	}
 	if ui, err := prov.Inner().UserInfo(ctx, oauth2.StaticTokenSource(tok)); err == nil {
 		var uClaims map[string]any
 		if err := ui.Claims(&uClaims); err == nil {
+			if uiSub, _ := uClaims["sub"].(string); uiSub != "" && uiSub != idSub {
+				return nil, status.Error(codes.Unauthenticated, "userinfo subject mismatch")
+			}
 			for k, v := range uClaims {
 				merged[k] = v
 			}

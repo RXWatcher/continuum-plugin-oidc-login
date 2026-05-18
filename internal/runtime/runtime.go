@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"regexp"
 	"strings"
@@ -180,14 +181,17 @@ func validate(cfg Config) error {
 	if cfg.IssuerURL == "" {
 		return errors.New("issuer_url is required")
 	}
-	if _, err := url.Parse(cfg.IssuerURL); err != nil {
-		return fmt.Errorf("issuer_url is not a valid URL: %w", err)
+	if err := validateIssuerURL(cfg.IssuerURL); err != nil {
+		return err
 	}
 	if cfg.ClientID == "" {
 		return errors.New("client_id is required")
 	}
 	if cfg.ClientSecret == "" {
 		return errors.New("client_secret is required")
+	}
+	if !scopeIncludesOpenID(cfg.Scopes) {
+		return errors.New("scopes must include openid")
 	}
 	if !IconAllowed(cfg.IconURLPath) {
 		return fmt.Errorf("icon_url_path %q not in allowlist", cfg.IconURLPath)
@@ -200,6 +204,9 @@ func validate(cfg Config) error {
 			return fmt.Errorf("claim_filters[%d]: claim_path required", i)
 		}
 		if err := ValidateClaimPath(f.ClaimPath); err != nil {
+			return fmt.Errorf("claim_filters[%d]: %w", i, err)
+		}
+		if err := ValidateOperatorValue(f.Operator, f.Value); err != nil {
 			return fmt.Errorf("claim_filters[%d]: %w", i, err)
 		}
 		if f.Operator == "regex" {
@@ -221,6 +228,9 @@ func validate(cfg Config) error {
 		if r.Role != "user" && r.Role != "admin" {
 			return fmt.Errorf("claim_role_mapping[%d]: role must be user or admin (got %q)", i, r.Role)
 		}
+		if err := ValidateOperatorValue(r.Operator, r.Value); err != nil {
+			return fmt.Errorf("claim_role_mapping[%d]: %w", i, err)
+		}
 		if r.Operator == "regex" {
 			if _, err := regexp.Compile(stringOf(r.Value)); err != nil {
 				return fmt.Errorf("claim_role_mapping[%d]: invalid regex: %w", i, err)
@@ -228,6 +238,40 @@ func validate(cfg Config) error {
 		}
 	}
 	return nil
+}
+
+func validateIssuerURL(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("issuer_url is not a valid URL: %w", err)
+	}
+	if u.Scheme != "https" && u.Scheme != "http" {
+		return fmt.Errorf("issuer_url scheme must be http or https")
+	}
+	if u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return fmt.Errorf("issuer_url must be an origin URL without credentials, query, or fragment")
+	}
+	if u.Scheme == "http" && !isLocalhost(u.Hostname()) {
+		return fmt.Errorf("issuer_url must use https except for localhost")
+	}
+	return nil
+}
+
+func isLocalhost(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+func scopeIncludesOpenID(scopes string) bool {
+	for _, scope := range strings.Fields(scopes) {
+		if scope == "openid" {
+			return true
+		}
+	}
+	return false
 }
 
 // claimPathSegment matches a single dotted segment: identifier-ish chars only.
@@ -261,6 +305,19 @@ func ValidateOperator(op string) error {
 		return nil
 	}
 	return fmt.Errorf("operator must be one of equals|contains|starts_with|regex (got %q)", op)
+}
+
+// ValidateOperatorValue rejects rule values that cannot be interpreted by the
+// selected operator. equals and contains accept any JSON value; starts_with and
+// regex operate on string patterns only.
+func ValidateOperatorValue(op string, value any) error {
+	switch op {
+	case "starts_with", "regex":
+		if _, ok := value.(string); !ok {
+			return fmt.Errorf("operator %s requires a string value", op)
+		}
+	}
+	return nil
 }
 
 // IconAllowed returns true iff name is in AllowedIcons.

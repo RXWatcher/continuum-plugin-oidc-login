@@ -29,10 +29,10 @@ is WHMCS billing.
 
 | Key | Required | Description |
 |---|---|---|
-| `issuer_url` | yes | OIDC issuer URL. |
+| `issuer_url` | yes | OIDC issuer URL. HTTPS is required except for localhost testing. |
 | `client_id` | yes | OAuth client ID issued by the identity provider. |
 | `client_secret` | yes | OAuth client secret. |
-| `scopes` | no | Space-separated scopes. Defaults to `openid profile email`. |
+| `scopes` | no | Space-separated scopes. Must include `openid`. Defaults to `openid profile email`. |
 | `display_name` | no | Login-button label for this install. |
 | `icon_url_path` | no | Bundled icon filename managed by the admin SPA. |
 | `claim_filters` | no | JSON array of rules that must pass before sign-in is allowed. |

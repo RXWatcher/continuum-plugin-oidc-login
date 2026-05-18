@@ -296,6 +296,44 @@ func TestExchangeCode_EmailVerifiedRequired_RejectsUnverified(t *testing.T) {
 	}
 }
 
+func TestExchangeCode_MissingIDTokenSubject_Rejects(t *testing.T) {
+	idp := oidctest.NewIdP(t, "client-1")
+	cfg := pluginrt.Config{ClientID: "client-1", ClientSecret: "s"}
+	s := setupServer(t, cfg, idp)
+
+	code, _ := idp.IssueCode(t,
+		map[string]any{"nonce": "n", "email": "u@x.com", "email_verified": true},
+		map[string]any{"email": "u@x.com"},
+		"access-tok-12345678",
+	)
+	pState, _ := structpb.NewStruct(map[string]any{"pkce_verifier": "v", "nonce": "n"})
+	_, err := s.ExchangeCode(context.Background(), &pluginv1.ExchangeCodeRequest{
+		Code: code, State: "s", RedirectUri: "/cb", ProviderState: pState,
+	})
+	if status.Code(err) != codes.Unauthenticated {
+		t.Errorf("code = %v, want Unauthenticated; err = %v", status.Code(err), err)
+	}
+}
+
+func TestExchangeCode_UserInfoSubjectMismatch_Rejects(t *testing.T) {
+	idp := oidctest.NewIdP(t, "client-1")
+	cfg := pluginrt.Config{ClientID: "client-1", ClientSecret: "s"}
+	s := setupServer(t, cfg, idp)
+
+	code, _ := idp.IssueCode(t,
+		map[string]any{"sub": "id-token-sub", "nonce": "n", "email": "u@x.com", "email_verified": true},
+		map[string]any{"sub": "different-userinfo-sub", "email": "u@x.com"},
+		"access-tok-12345678",
+	)
+	pState, _ := structpb.NewStruct(map[string]any{"pkce_verifier": "v", "nonce": "n"})
+	_, err := s.ExchangeCode(context.Background(), &pluginv1.ExchangeCodeRequest{
+		Code: code, State: "s", RedirectUri: "/cb", ProviderState: pState,
+	})
+	if status.Code(err) != codes.Unauthenticated {
+		t.Errorf("code = %v, want Unauthenticated; err = %v", status.Code(err), err)
+	}
+}
+
 func TestExchangeCode_ClaimFilter_RejectsMissingGroup(t *testing.T) {
 	idp := oidctest.NewIdP(t, "client-1")
 	cfg := pluginrt.Config{

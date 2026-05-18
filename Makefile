@@ -1,14 +1,19 @@
 BINARY := continuum-plugin-oidc-login
 GO ?= go
+PNPM ?= pnpm
 
-.PHONY: build test clean
+.PHONY: build test test-go test-web clean
 build:
-	cd web && pnpm install --frozen-lockfile && pnpm run build && cd ..
+	cd web && $(PNPM) install --frozen-lockfile && $(PNPM) run build
 	$(GO) build -o $(BINARY) ./cmd/continuum-plugin-oidc-login
 
-test:
+test: test-go test-web
+
+test-go:
 	$(GO) test ./...
-	cd web && pnpm run test --run
+
+test-web:
+	cd web && $(PNPM) run test --run
 
 clean:
 	rm -f $(BINARY)

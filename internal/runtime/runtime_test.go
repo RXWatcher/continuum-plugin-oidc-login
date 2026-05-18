@@ -51,6 +51,53 @@ func TestLoadConfig_RequiresIssuerClient(t *testing.T) {
 	}
 }
 
+func TestLoadConfig_RejectsInvalidIssuerURL(t *testing.T) {
+	cases := map[string]string{
+		"relative":      "/idp",
+		"credentials":   "https://user:pass@idp.example",
+		"query":         "https://idp.example?x=1",
+		"insecure host": "http://idp.example",
+	}
+	for name, raw := range cases {
+		t.Run(name, func(t *testing.T) {
+			_, err := pluginrt.LoadConfig([]*pluginv1.ConfigEntry{
+				entry("issuer_url", raw),
+				entry("client_id", "c"),
+				entry("client_secret", "s"),
+			})
+			if err == nil {
+				t.Fatalf("expected error for %q", raw)
+			}
+		})
+	}
+}
+
+func TestLoadConfig_AllowsHTTPOnlyForLocalhostIssuer(t *testing.T) {
+	cfg, err := pluginrt.LoadConfig([]*pluginv1.ConfigEntry{
+		entry("issuer_url", "http://localhost:8080/"),
+		entry("client_id", "c"),
+		entry("client_secret", "s"),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if cfg.IssuerURL != "http://localhost:8080" {
+		t.Errorf("IssuerURL = %q", cfg.IssuerURL)
+	}
+}
+
+func TestLoadConfig_RequiresOpenIDScope(t *testing.T) {
+	_, err := pluginrt.LoadConfig([]*pluginv1.ConfigEntry{
+		entry("issuer_url", "https://idp"),
+		entry("client_id", "c"),
+		entry("client_secret", "s"),
+		entry("scopes", "profile email"),
+	})
+	if err == nil {
+		t.Fatal("expected error for scopes missing openid")
+	}
+}
+
 func TestLoadConfig_RejectsBadIcon(t *testing.T) {
 	_, err := pluginrt.LoadConfig([]*pluginv1.ConfigEntry{
 		entry("issuer_url", "https://idp"),
@@ -108,6 +155,38 @@ func TestLoadConfig_RejectsBadRegex(t *testing.T) {
 	})
 	if err == nil {
 		t.Error("expected regex compile rejection")
+	}
+}
+
+func TestLoadConfig_RejectsNonStringRegexValue(t *testing.T) {
+	filters, _ := structpb.NewList([]any{
+		map[string]any{"claim_path": "groups", "operator": "regex", "value": true},
+	})
+	v, _ := structpb.NewStruct(map[string]any{"value": filters.AsSlice()})
+	_, err := pluginrt.LoadConfig([]*pluginv1.ConfigEntry{
+		entry("issuer_url", "https://idp"),
+		entry("client_id", "c"),
+		entry("client_secret", "s"),
+		{Key: "claim_filters", Value: v},
+	})
+	if err == nil {
+		t.Fatal("expected regex value type rejection")
+	}
+}
+
+func TestLoadConfig_RejectsNonStringStartsWithValue(t *testing.T) {
+	rules, _ := structpb.NewList([]any{
+		map[string]any{"claim_path": "email", "operator": "starts_with", "value": false, "role": "admin"},
+	})
+	v, _ := structpb.NewStruct(map[string]any{"value": rules.AsSlice()})
+	_, err := pluginrt.LoadConfig([]*pluginv1.ConfigEntry{
+		entry("issuer_url", "https://idp"),
+		entry("client_id", "c"),
+		entry("client_secret", "s"),
+		{Key: "claim_role_mapping", Value: v},
+	})
+	if err == nil {
+		t.Fatal("expected starts_with value type rejection")
 	}
 }
 
