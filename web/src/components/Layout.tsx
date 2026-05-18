@@ -28,8 +28,8 @@ export default function Layout() {
         <p className="text-muted-foreground mt-2">
           You need an admin role to view this page.
         </p>
-        <a href="/" className="mt-4 inline-block underline">
-          &larr; Back to Continuum
+        <a href="/admin/plugins" className="mt-4 inline-block underline">
+          &larr; Back to Continuum plugins
         </a>
       </div>
     );
