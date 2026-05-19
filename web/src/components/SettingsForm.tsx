@@ -3,6 +3,10 @@ import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import IconPicker from "./IconPicker";
 import DiscoveryPanel from "./DiscoveryPanel";
+import { Button } from "@/components/ui/button";
+import { copyText } from "@/lib/copyText";
+import { currentOAuthCallbackUrl } from "@/lib/oauthCallbackUrl";
+import { toast } from "sonner";
 
 export type SettingsState = {
   issuer_url: string;
@@ -29,8 +33,29 @@ export default function SettingsForm({
   setState: (updater: (prev: SettingsState) => SettingsState) => void;
   availableIcons: string[];
 }) {
+  const callbackUrl = currentOAuthCallbackUrl();
+  const copyCallbackUrl = async () => {
+    if (await copyText(callbackUrl)) {
+      toast.success("Callback URL copied");
+    } else {
+      toast.error("Copy failed. Select the URL and copy it manually.");
+    }
+  };
+
   return (
     <div className="space-y-5">
+      <div className="space-y-2">
+        <Label>Callback URL</Label>
+        <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+          <Input readOnly value={callbackUrl} />
+          <Button type="button" variant="outline" onClick={copyCallbackUrl}>
+            Copy
+          </Button>
+        </div>
+        <p className="text-muted-foreground text-xs">
+          Paste this as the redirect or callback URL in your OIDC client.
+        </p>
+      </div>
       <div className="space-y-2">
         <Label>Issuer URL</Label>
         <Input

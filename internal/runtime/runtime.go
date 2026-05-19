@@ -209,7 +209,7 @@ func ValidateConfig(cfg Config) error {
 		return errors.New("scopes must include openid")
 	}
 	if !IconAllowed(cfg.IconURLPath) {
-		return fmt.Errorf("icon_url_path %q not in allowlist", cfg.IconURLPath)
+		return fmt.Errorf("icon_url_path %q must be a bundled icon, absolute http(s) URL, or root-relative path", cfg.IconURLPath)
 	}
 	for i, f := range cfg.ClaimFilters {
 		if err := ValidateOperator(f.Operator); err != nil {
@@ -342,7 +342,21 @@ func IconAllowed(name string) bool {
 			return true
 		}
 	}
-	return false
+	return customIconAllowed(name)
+}
+
+func customIconAllowed(raw string) bool {
+	if raw == "" || strings.ContainsAny(raw, " \t\r\n") {
+		return false
+	}
+	if strings.HasPrefix(raw, "/") {
+		return !strings.HasPrefix(raw, "//") && !strings.Contains(raw, "..")
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	return (u.Scheme == "https" || u.Scheme == "http") && u.Host != "" && u.User == nil
 }
 
 func stringOf(v any) string {

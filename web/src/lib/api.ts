@@ -10,6 +10,13 @@ export function mountPath(): string {
   return m ? m[1] : "";
 }
 
+export function installationID(): number | null {
+  const m = mountPath().match(/\/api\/v1\/plugins\/(\d+)$/);
+  if (!m?.[1]) return null;
+  const id = Number(m[1]);
+  return Number.isInteger(id) && id > 0 ? id : null;
+}
+
 function authHeaders(): Record<string, string> {
   const t = getCachedToken();
   return t ? { Authorization: `Bearer ${t}` } : {};
@@ -38,6 +45,12 @@ export const api = {
   patch: <T>(path: string, body: unknown): Promise<T> =>
     fetch(mountPath() + path, {
       method: "PATCH",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify(body),
+    }).then(jsonOrThrow<T>),
+  hostPut: <T>(path: string, body: unknown): Promise<T> =>
+    fetch(path, {
+      method: "PUT",
       headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify(body),
     }).then(jsonOrThrow<T>),

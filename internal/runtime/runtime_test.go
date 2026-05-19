@@ -122,6 +122,30 @@ func TestLoadConfig_RejectsBadIcon(t *testing.T) {
 	}
 }
 
+func TestLoadConfig_AcceptsCustomIconURLOrRootPath(t *testing.T) {
+	cases := []string{
+		"https://example.com/icon.svg",
+		"http://localhost:8090/icon.svg",
+		"/assets/custom-oidc.svg",
+	}
+	for _, raw := range cases {
+		t.Run(raw, func(t *testing.T) {
+			cfg, err := pluginrt.LoadConfig([]*pluginv1.ConfigEntry{
+				entry("issuer_url", "https://idp"),
+				entry("client_id", "c"),
+				entry("client_secret", "s"),
+				entry("icon_url_path", raw),
+			})
+			if err != nil {
+				t.Fatalf("LoadConfig: %v", err)
+			}
+			if cfg.IconURLPath != raw {
+				t.Errorf("IconURLPath = %q, want %q", cfg.IconURLPath, raw)
+			}
+		})
+	}
+}
+
 func TestLoadConfig_RejectsBadOperator(t *testing.T) {
 	filters, _ := structpb.NewList([]any{
 		map[string]any{"claim_path": "groups", "operator": "is-not-an-operator", "value": "x"},
