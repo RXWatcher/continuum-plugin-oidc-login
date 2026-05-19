@@ -52,6 +52,7 @@ type RoleMappingRule struct {
 
 // Config is the parsed plugin global config (spec Layer 2.2).
 type Config struct {
+	DatabaseURL           string            `json:"database_url"`
 	IssuerURL             string            `json:"issuer_url"`
 	ClientID              string            `json:"client_id"`
 	ClientSecret          string            `json:"client_secret"`
@@ -136,6 +137,8 @@ func LoadConfig(entries []*pluginv1.ConfigEntry) (Config, error) {
 		m := v.AsMap()
 		val := m["value"]
 		switch e.GetKey() {
+		case "database_url":
+			cfg.DatabaseURL = stringOf(val)
 		case "issuer_url":
 			cfg.IssuerURL = strings.TrimRight(stringOf(val), "/")
 		case "client_id":
@@ -181,13 +184,13 @@ func LoadConfig(entries []*pluginv1.ConfigEntry) (Config, error) {
 		}
 	}
 
-	if err := validate(cfg); err != nil {
+	if err := ValidateConfig(cfg); err != nil {
 		return Config{}, err
 	}
 	return cfg, nil
 }
 
-func validate(cfg Config) error {
+func ValidateConfig(cfg Config) error {
 	if cfg.providerPartiallyConfigured() {
 		if cfg.IssuerURL == "" {
 			return errors.New("issuer_url is required when OIDC provider settings are present")

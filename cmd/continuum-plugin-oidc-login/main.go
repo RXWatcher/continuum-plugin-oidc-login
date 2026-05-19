@@ -15,6 +15,7 @@ import (
 	"sync/atomic"
 
 	"github.com/hashicorp/go-hclog"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	pluginv1 "github.com/ContinuumApp/continuum-plugin-sdk/pkg/pluginproto/continuum/plugin/v1"
 	publicmanifest "github.com/ContinuumApp/continuum-plugin-sdk/pkg/pluginsdk/manifest"
@@ -27,6 +28,7 @@ import (
 	pluginoidc "github.com/ContinuumApp/continuum-plugin-oidc-login/internal/oidc"
 	pluginrt "github.com/ContinuumApp/continuum-plugin-oidc-login/internal/runtime"
 	"github.com/ContinuumApp/continuum-plugin-oidc-login/internal/server"
+	"github.com/ContinuumApp/continuum-plugin-oidc-login/internal/store"
 	"github.com/ContinuumApp/continuum-plugin-oidc-login/web"
 )
 
@@ -47,8 +49,10 @@ func main() {
 	// Live config + provider live behind atomic pointers. Capability handlers
 	// read them per-RPC; Configure swaps them atomically.
 	var (
-		cfgPtr  atomic.Pointer[pluginrt.Config]
-		provPtr atomic.Pointer[pluginoidc.Provider]
+		cfgPtr   atomic.Pointer[pluginrt.Config]
+		provPtr  atomic.Pointer[pluginoidc.Provider]
+		poolPtr  atomic.Pointer[pgxpool.Pool]
+		storePtr atomic.Pointer[store.Store]
 	)
 
 	authSrv := pluginauth.NewServer(
@@ -61,7 +65,7 @@ func main() {
 		func() *pluginoidc.Provider { return provPtr.Load() },
 	)
 
-	rt := pluginrt.New(manifest, func(cfg pluginrt.Config) error {
+	applyConfig := func(cfg pluginrt.Config) error {
 		var prov *pluginoidc.Provider
 		if cfg.ProviderConfigured() {
 			var err error
@@ -77,6 +81,41 @@ func main() {
 		}
 		cfgPtr.Store(&cfg)
 		provPtr.Store(prov)
+		logger.Info("configured", "issuer_url", cfg.IssuerURL, "display_name", cfg.DisplayName, "provider_configured", cfg.ProviderConfigured())
+		return nil
+	}
+
+	rt := pluginrt.New(manifest, func(cfg pluginrt.Config) error {
+		if cfg.DatabaseURL == "" {
+			return fmt.Errorf("database_url is required")
+		}
+		ctx := context.Background()
+		pcfg, err := pgxpool.ParseConfig(cfg.DatabaseURL)
+		if err != nil {
+			return fmt.Errorf("parse database_url: %w", err)
+		}
+		if pcfg.MaxConns < 8 {
+			pcfg.MaxConns = 8
+		}
+		pool, err := pgxpool.NewWithConfig(ctx, pcfg)
+		if err != nil {
+			return fmt.Errorf("connect database: %w", err)
+		}
+		if err := store.Migrate(ctx, pool); err != nil {
+			pool.Close()
+			return fmt.Errorf("migrate: %w", err)
+		}
+		st := store.New(pool)
+		effective, err := st.ImportLegacyConfig(ctx, cfg)
+		if err != nil {
+			pool.Close()
+			return fmt.Errorf("import app config: %w", err)
+		}
+		if err := applyConfig(effective); err != nil {
+			pool.Close()
+			return err
+		}
+		storePtr.Store(st)
 
 		adminSrv := pluginadmin.NewServer(pluginadmin.Deps{
 			ConfigFn: func() pluginrt.Config {
@@ -86,6 +125,16 @@ func main() {
 				return pluginrt.Config{}
 			},
 			ProviderFn: func() *pluginoidc.Provider { return provPtr.Load() },
+			UpdateConfigFn: func(ctx context.Context, next pluginrt.Config) error {
+				st := storePtr.Load()
+				if st == nil {
+					return fmt.Errorf("store not configured")
+				}
+				if err := st.UpdateConfig(ctx, next); err != nil {
+					return err
+				}
+				return applyConfig(next)
+			},
 		})
 
 		srv := server.New(server.Deps{
@@ -94,7 +143,9 @@ func main() {
 			AssetsFS:     assets.FS(),
 		})
 		httpSrv.SetHandler(srv.Handler())
-		logger.Info("configured", "issuer_url", cfg.IssuerURL, "display_name", cfg.DisplayName, "provider_configured", cfg.ProviderConfigured())
+		if old := poolPtr.Swap(pool); old != nil {
+			old.Close()
+		}
 		return nil
 	})
 

@@ -1,6 +1,5 @@
 // Thin fetch wrapper that knows how to talk to the plugin's HTTP routes
-// (mounted under /api/v1/plugins/{installId}/...) and to continuum's host
-// PATCH /api/v1/admin/plugins/{installId}/config endpoint for saving config.
+// mounted under /api/v1/plugins/{installId}/...
 
 import { getCachedToken } from "./identity";
 
@@ -48,20 +47,3 @@ export const api = {
       headers: authHeaders(),
     }).then(jsonOrThrow<T>),
 };
-
-// patchPluginConfig hits continuum's host endpoint (NOT the plugin's mount path)
-// to update one or more plugin_installation_config entries.
-export async function patchPluginConfig(
-  installID: string,
-  entries: Record<string, { value: unknown }>,
-): Promise<void> {
-  const r = await fetch(`/api/v1/admin/plugins/${installID}/config`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json", ...authHeaders() },
-    body: JSON.stringify({ entries }),
-  });
-  if (!r.ok) {
-    const body = await r.text().catch(() => "");
-    throw new Error(`${r.status}: ${body}`);
-  }
-}

@@ -29,8 +29,9 @@ const maxResponseBytes = 10 << 20 // 10 MiB
 // ProviderFn are called per-request so the latest Configure values are
 // always observed.
 type Deps struct {
-	ConfigFn   func() pluginrt.Config
-	ProviderFn func() *pluginoidc.Provider
+	ConfigFn       func() pluginrt.Config
+	ProviderFn     func() *pluginoidc.Provider
+	UpdateConfigFn func(context.Context, pluginrt.Config) error
 }
 
 // Server exposes a chi handler. It owns no state of its own beyond Deps.
@@ -49,10 +50,71 @@ func (s *Server) Handler() http.Handler {
 	r.Group(func(r chi.Router) {
 		r.Use(s.requireAdmin)
 		r.Get("/api/v1/admin/config-summary", s.handleConfigSummary)
+		r.Patch("/api/v1/admin/config", s.handleUpdateConfig)
 		r.Get("/api/v1/admin/discovery", s.handleDiscovery)
 		r.Post("/api/v1/admin/decode-id-token", s.handleDecodeIDToken)
 	})
 	return r
+}
+
+func (s *Server) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
+	if s.deps.UpdateConfigFn == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "config store unavailable"})
+		return
+	}
+	cur := s.deps.ConfigFn()
+	var req struct {
+		IssuerURL             *string                     `json:"issuer_url"`
+		ClientID              *string                     `json:"client_id"`
+		ClientSecret          *string                     `json:"client_secret"`
+		Scopes                *string                     `json:"scopes"`
+		DisplayName           *string                     `json:"display_name"`
+		IconURLPath           *string                     `json:"icon_url_path"`
+		ClaimFilters          *[]pluginrt.ClaimFilter     `json:"claim_filters"`
+		ClaimRoleMapping      *[]pluginrt.RoleMappingRule `json:"claim_role_mapping"`
+		EmailVerifiedRequired *bool                       `json:"email_verified_required"`
+		LinkByEmail           *bool                       `json:"link_by_email"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid JSON body"})
+		return
+	}
+	if req.IssuerURL != nil {
+		cur.IssuerURL = strings.TrimRight(strings.TrimSpace(*req.IssuerURL), "/")
+	}
+	if req.ClientID != nil {
+		cur.ClientID = strings.TrimSpace(*req.ClientID)
+	}
+	if req.ClientSecret != nil && *req.ClientSecret != "" {
+		cur.ClientSecret = *req.ClientSecret
+	}
+	if req.Scopes != nil {
+		cur.Scopes = strings.TrimSpace(*req.Scopes)
+	}
+	if req.DisplayName != nil {
+		cur.DisplayName = strings.TrimSpace(*req.DisplayName)
+	}
+	if req.IconURLPath != nil {
+		cur.IconURLPath = strings.TrimSpace(*req.IconURLPath)
+	}
+	if req.ClaimFilters != nil {
+		cur.ClaimFilters = *req.ClaimFilters
+	}
+	if req.ClaimRoleMapping != nil {
+		cur.ClaimRoleMapping = *req.ClaimRoleMapping
+	}
+	if req.EmailVerifiedRequired != nil {
+		cur.EmailVerifiedRequired = *req.EmailVerifiedRequired
+	}
+	if req.LinkByEmail != nil {
+		cur.LinkByEmail = *req.LinkByEmail
+	}
+	cur.DatabaseURL = ""
+	if err := s.deps.UpdateConfigFn(r.Context(), cur); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 // requireAdmin gates the wrapped handlers on X-Continuum-User-Role: admin.

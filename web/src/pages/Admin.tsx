@@ -4,8 +4,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { api, patchPluginConfig } from "@/lib/api";
-import { installID } from "@/lib/identity";
+import { api } from "@/lib/api";
 import SettingsForm, { type SettingsState } from "@/components/SettingsForm";
 import ClaimFilterEditor, {
   type ClaimFilter,
@@ -31,9 +30,8 @@ type ConfigSummary = {
 
 // Admin page composes the three card sections + Diagnostics + a single Save
 // button at the bottom. All state lives here; sub-components are pure
-// controlled inputs. Save PATCHes continuum's host config endpoint with
-// every key — the host writes them back into plugin_installation_config and
-// pushes a Configure RPC at the plugin, which rebuilds the OIDC provider.
+// controlled inputs. Save PATCHes the plugin admin endpoint, which stores the
+// settings in the plugin database and rebuilds the OIDC provider.
 export default function Admin() {
   const qc = useQueryClient();
   const cfgQ = useQuery({
@@ -74,21 +72,21 @@ export default function Admin() {
 
   const save = useMutation({
     mutationFn: async () => {
-      const entries: Record<string, { value: unknown }> = {
-        issuer_url: { value: settings.issuer_url },
-        client_id: { value: settings.client_id },
-        scopes: { value: settings.scopes },
-        display_name: { value: settings.display_name },
-        icon_url_path: { value: settings.icon_url_path },
-        email_verified_required: { value: settings.email_verified_required },
-        link_by_email: { value: settings.link_by_email },
-        claim_filters: { value: filters },
-        claim_role_mapping: { value: mapping },
+      const body: Record<string, unknown> = {
+        issuer_url: settings.issuer_url,
+        client_id: settings.client_id,
+        scopes: settings.scopes,
+        display_name: settings.display_name,
+        icon_url_path: settings.icon_url_path,
+        email_verified_required: settings.email_verified_required,
+        link_by_email: settings.link_by_email,
+        claim_filters: filters,
+        claim_role_mapping: mapping,
       };
       if (settings.client_secret) {
-        entries.client_secret = { value: settings.client_secret };
+        body.client_secret = settings.client_secret;
       }
-      await patchPluginConfig(installID(), entries);
+      await api.patch("/api/v1/admin/config", body);
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["config-summary"] });
