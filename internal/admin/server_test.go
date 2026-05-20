@@ -154,6 +154,35 @@ func TestDiscovery_NoIssuer_ReturnsError(t *testing.T) {
 	}
 }
 
+func TestDiscovery_UnreachableIssuer_ReturnsErrorPayload(t *testing.T) {
+	idp := oidctest.NewIdP(t, "c")
+	// IssuerURL points at a high port on the loopback that nothing is listening
+	// on. Discovery should NOT return 5xx — it should return ok=false with the
+	// dialer error so the SPA can render it inline.
+	cfg := pluginrt.Config{IssuerURL: "http://127.0.0.1:1", ClientID: "c", ClientSecret: "s"}
+	s := admin.NewServer(admin.Deps{
+		ConfigFn:   func() pluginrt.Config { return cfg },
+		ProviderFn: func() *pluginoidc.Provider { return nil },
+	})
+	_ = idp // keep linter happy
+
+	r := httptest.NewRequest("GET", "/api/v1/admin/discovery", nil)
+	r.Header.Set("X-Continuum-User-Role", "admin")
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("code = %d, want 200 (errors must come back as ok=false payload)", w.Code)
+	}
+	var body map[string]any
+	_ = json.Unmarshal(w.Body.Bytes(), &body)
+	if body["ok"] != false {
+		t.Errorf("ok = %v, want false", body["ok"])
+	}
+	if errMsg, _ := body["error"].(string); errMsg == "" {
+		t.Errorf("expected error message describing the connect failure")
+	}
+}
+
 func TestDecodeIDToken_VerifiesAndReturnsClaims(t *testing.T) {
 	idp := oidctest.NewIdP(t, "client-1")
 	s := newAdmin(t, pluginrt.Config{IssuerURL: idp.URL, ClientID: "client-1", ClientSecret: "s"}, idp)
@@ -181,6 +210,146 @@ func TestDecodeIDToken_VerifiesAndReturnsClaims(t *testing.T) {
 	c, _ := resp["claims"].(map[string]any)
 	if c["sub"] != "u-1" {
 		t.Errorf("claims.sub = %v", c["sub"])
+	}
+}
+
+func TestSimulateClaims_UsesLiveConfig_AndAcceptsValidUser(t *testing.T) {
+	idp := oidctest.NewIdP(t, "client-1")
+	cfg := pluginrt.Config{
+		IssuerURL:    idp.URL,
+		ClientID:     "client-1",
+		ClientSecret: "s",
+		ClaimFilters: []pluginrt.ClaimFilter{
+			{ClaimPath: "groups", Operator: "contains", Value: "continuum-users"},
+		},
+		ClaimRoleMapping: []pluginrt.RoleMappingRule{
+			{ClaimPath: "groups", Operator: "contains", Value: "continuum-admins", Role: "admin"},
+		},
+		EmailVerifiedRequired: true,
+	}
+	s := newAdmin(t, cfg, idp)
+
+	body, _ := json.Marshal(map[string]any{
+		"claims": map[string]any{
+			"sub":            "u-1",
+			"email":          "ada@example.com",
+			"email_verified": true,
+			"groups":         []any{"continuum-users", "continuum-admins"},
+			"name":           "Ada",
+		},
+	})
+	r := httptest.NewRequest("POST", "/api/v1/admin/simulate-claims", strings.NewReader(string(body)))
+	r.Header.Set("X-Continuum-User-Role", "admin")
+	r.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("code = %d body = %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp["allowed"] != true {
+		t.Errorf("allowed = %v, want true", resp["allowed"])
+	}
+	if resp["role"] != "admin" {
+		t.Errorf("role = %v, want admin", resp["role"])
+	}
+	ec, _ := resp["email_verified_check"].(map[string]any)
+	if ec["passed"] != true {
+		t.Errorf("email_verified_check.passed = %v", ec["passed"])
+	}
+}
+
+func TestSimulateClaims_RejectsOnFilterMiss_AndReportsTrace(t *testing.T) {
+	idp := oidctest.NewIdP(t, "client-1")
+	cfg := pluginrt.Config{
+		IssuerURL:    idp.URL,
+		ClientID:     "client-1",
+		ClientSecret: "s",
+		ClaimFilters: []pluginrt.ClaimFilter{
+			{ClaimPath: "groups", Operator: "contains", Value: "continuum-users"},
+		},
+		EmailVerifiedRequired: false,
+	}
+	s := newAdmin(t, cfg, idp)
+
+	body, _ := json.Marshal(map[string]any{
+		"claims": map[string]any{
+			"sub":    "u-1",
+			"groups": []any{"random-group"},
+		},
+	})
+	r := httptest.NewRequest("POST", "/api/v1/admin/simulate-claims", strings.NewReader(string(body)))
+	r.Header.Set("X-Continuum-User-Role", "admin")
+	r.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("code = %d", w.Code)
+	}
+	var resp map[string]any
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp["allowed"] != false {
+		t.Errorf("allowed = %v, want false", resp["allowed"])
+	}
+	if resp["filters_passed"] != false {
+		t.Errorf("filters_passed = %v, want false", resp["filters_passed"])
+	}
+	trace, _ := resp["filter_trace"].([]any)
+	if len(trace) != 1 {
+		t.Fatalf("filter_trace length = %d, want 1", len(trace))
+	}
+	first := trace[0].(map[string]any)
+	if first["match"] != false {
+		t.Errorf("first.match = %v, want false", first["match"])
+	}
+}
+
+func TestSimulateClaims_BodyOverridesLiveConfig(t *testing.T) {
+	idp := oidctest.NewIdP(t, "client-1")
+	// Live config requires email_verified; body asks us to relax that.
+	cfg := pluginrt.Config{
+		IssuerURL:             idp.URL,
+		ClientID:              "client-1",
+		ClientSecret:          "s",
+		EmailVerifiedRequired: true,
+	}
+	s := newAdmin(t, cfg, idp)
+
+	relax := false
+	body, _ := json.Marshal(map[string]any{
+		"claims":                  map[string]any{"sub": "u-1", "email_verified": false},
+		"email_verified_required": relax,
+	})
+	r := httptest.NewRequest("POST", "/api/v1/admin/simulate-claims", strings.NewReader(string(body)))
+	r.Header.Set("X-Continuum-User-Role", "admin")
+	r.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("code = %d", w.Code)
+	}
+	var resp map[string]any
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	ec, _ := resp["email_verified_check"].(map[string]any)
+	if ec["required"] != false {
+		t.Errorf("override didn't take: required = %v", ec["required"])
+	}
+	if resp["allowed"] != true {
+		t.Errorf("allowed = %v with overridden email check", resp["allowed"])
+	}
+}
+
+func TestSimulateClaims_NonAdmin_403(t *testing.T) {
+	idp := oidctest.NewIdP(t, "client-1")
+	s := newAdmin(t, pluginrt.Config{IssuerURL: idp.URL, ClientID: "client-1", ClientSecret: "s"}, idp)
+	r := httptest.NewRequest("POST", "/api/v1/admin/simulate-claims", strings.NewReader(`{"claims":{}}`))
+	r.Header.Set("X-Continuum-User-Role", "user")
+	r.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, r)
+	if w.Code != http.StatusForbidden {
+		t.Errorf("code = %d, want 403", w.Code)
 	}
 }
 

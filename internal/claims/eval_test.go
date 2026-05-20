@@ -74,6 +74,80 @@ func TestResolveRole_EmptyRules_DefaultsToUser(t *testing.T) {
 	}
 }
 
+func TestTraceFilters_RunsAllFilters_AndReportsPerFilterMatch(t *testing.T) {
+	c := map[string]any{
+		"groups":         []any{"continuum-users"},
+		"email_verified": true,
+	}
+	filters := []pluginrt.ClaimFilter{
+		{ClaimPath: "groups", Operator: "contains", Value: "continuum-users"},
+		{ClaimPath: "groups", Operator: "contains", Value: "missing-group"},
+		{ClaimPath: "email_verified", Operator: "equals", Value: true},
+	}
+	trace, allPass := claims.TraceFilters(c, filters)
+	if allPass {
+		t.Error("expected overall fail because second filter doesn't match")
+	}
+	if len(trace) != 3 {
+		t.Fatalf("trace length = %d, want 3", len(trace))
+	}
+	if !trace[0].Match || !trace[0].ClaimFound {
+		t.Errorf("filter 0: expected match+found, got %+v", trace[0])
+	}
+	if trace[1].Match {
+		t.Errorf("filter 1: expected no match, got %+v", trace[1])
+	}
+	if !trace[2].Match {
+		t.Errorf("filter 2: expected match, got %+v", trace[2])
+	}
+}
+
+func TestTraceFilters_MissingClaim_RecordsFoundFalse(t *testing.T) {
+	trace, allPass := claims.TraceFilters(map[string]any{"sub": "u"}, []pluginrt.ClaimFilter{
+		{ClaimPath: "groups", Operator: "contains", Value: "x"},
+	})
+	if allPass {
+		t.Error("missing claim should fail overall")
+	}
+	if trace[0].ClaimFound {
+		t.Error("ClaimFound should be false for missing claim")
+	}
+	if trace[0].Match {
+		t.Error("Match should be false when claim is missing")
+	}
+}
+
+func TestTraceFilters_EmptyList_PassesWithEmptyTrace(t *testing.T) {
+	trace, allPass := claims.TraceFilters(map[string]any{}, nil)
+	if !allPass {
+		t.Error("empty filters should pass")
+	}
+	if len(trace) != 0 {
+		t.Errorf("expected empty trace, got %d entries", len(trace))
+	}
+}
+
+func TestTraceRole_ReturnsMatchedIndex(t *testing.T) {
+	c := map[string]any{"groups": []any{"continuum-admins"}}
+	rules := []pluginrt.RoleMappingRule{
+		{ClaimPath: "groups", Operator: "contains", Value: "engineering", Role: "user"},
+		{ClaimPath: "groups", Operator: "contains", Value: "continuum-admins", Role: "admin"},
+	}
+	role, idx := claims.TraceRole(c, rules)
+	if role != "admin" || idx != 1 {
+		t.Errorf("TraceRole = (%q, %d), want (admin, 1)", role, idx)
+	}
+}
+
+func TestTraceRole_NoMatch_ReturnsMinusOne(t *testing.T) {
+	role, idx := claims.TraceRole(map[string]any{}, []pluginrt.RoleMappingRule{
+		{ClaimPath: "groups", Operator: "contains", Value: "admins", Role: "admin"},
+	})
+	if role != "user" || idx != -1 {
+		t.Errorf("TraceRole = (%q, %d), want (user, -1)", role, idx)
+	}
+}
+
 func TestResolveRole_NestedPath(t *testing.T) {
 	c := map[string]any{
 		"realm_access": map[string]any{

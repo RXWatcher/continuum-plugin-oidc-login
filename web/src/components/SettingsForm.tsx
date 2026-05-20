@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -7,6 +8,15 @@ import { Button } from "@/components/ui/button";
 import { copyText } from "@/lib/copyText";
 import { currentOAuthCallbackUrl } from "@/lib/oauthCallbackUrl";
 import { toast } from "sonner";
+import { AlertTriangle } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 export type SettingsState = {
   issuer_url: string;
@@ -40,6 +50,20 @@ export default function SettingsForm({
     } else {
       toast.error("Copy failed. Select the URL and copy it manually.");
     }
+  };
+  const [confirmLinkOpen, setConfirmLinkOpen] = useState(false);
+  // Toggle handler for link_by_email. Disabling is unconditional; enabling
+  // pops a confirmation modal so the security implication is explicit.
+  const toggleLinkByEmail = (next: boolean) => {
+    if (!next) {
+      setState((s) => ({ ...s, link_by_email: false }));
+      return;
+    }
+    setConfirmLinkOpen(true);
+  };
+  const confirmEnableLink = () => {
+    setState((s) => ({ ...s, link_by_email: true }));
+    setConfirmLinkOpen(false);
   };
 
   return (
@@ -125,16 +149,66 @@ export default function SettingsForm({
         <label className="flex items-center gap-2">
           <Checkbox
             checked={state.link_by_email}
-            onCheckedChange={(v) =>
-              setState((s) => ({ ...s, link_by_email: !!v }))
-            }
+            onCheckedChange={(v) => toggleLinkByEmail(!!v)}
           />
-          <span>
-            Auto-link to existing user by email (less safe — only enable if
-            you trust the IdP)
-          </span>
+          <span>Auto-link to existing user by email</span>
         </label>
+        {state.link_by_email && (
+          <div className="border-destructive/30 bg-destructive/10 text-destructive flex gap-2 rounded-md border p-3 text-xs">
+            <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+            <div className="space-y-1">
+              <div className="font-medium">Account-linking enabled</div>
+              <p>
+                Continuum will merge a sign-in into an existing local account
+                whenever the IdP's <span className="font-mono">email</span>{" "}
+                claim matches. If the IdP doesn't strictly verify email
+                addresses, anyone able to claim a Continuum user's email at
+                the IdP can take over that account. Only keep this on when you
+                trust the IdP to enforce email ownership.
+              </p>
+            </div>
+          </div>
+        )}
       </div>
+
+      <Dialog open={confirmLinkOpen} onOpenChange={setConfirmLinkOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="text-destructive size-5" />
+              Enable account-linking by email?
+            </DialogTitle>
+            <DialogDescription>
+              When enabled, a sign-in is merged into an existing Continuum
+              account whenever the IdP's email matches. If the IdP doesn't
+              strictly verify email addresses, an attacker who controls the
+              matching email at the IdP can take over that account.
+            </DialogDescription>
+          </DialogHeader>
+          <ul className="text-muted-foreground list-disc pl-5 text-sm">
+            <li>Only enable for IdPs that verify email ownership.</li>
+            <li>
+              Keep <span className="font-mono">Require verified email</span>{" "}
+              checked above unless you understand the trade-off.
+            </li>
+            <li>
+              Disable this if you don't need the existing-account merge
+              behavior.
+            </li>
+          </ul>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setConfirmLinkOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={confirmEnableLink}>
+              Enable anyway
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

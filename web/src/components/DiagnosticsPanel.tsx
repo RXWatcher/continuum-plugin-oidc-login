@@ -32,13 +32,17 @@ function formatExpiry(exp: unknown): {
 
 // DiagnosticsPanel decodes a pasted id_token against the live JWKS. The
 // per-claim "Filter" / "Role" buttons prefill a new row in the editors
-// above via the onUseAsFilter / onUseAsRoleMapping callbacks.
+// above via the onUseAsFilter / onUseAsRoleMapping callbacks. onClaimsDecoded
+// fires whenever a token has been decoded successfully so the parent can
+// pipe the claims into the simulator.
 export default function DiagnosticsPanel({
   onUseAsFilter,
   onUseAsRoleMapping,
+  onClaimsDecoded,
 }: {
   onUseAsFilter?: (claimPath: string) => void;
   onUseAsRoleMapping?: (claimPath: string) => void;
+  onClaimsDecoded?: (claims: Record<string, unknown>) => void;
 }) {
   const [token, setToken] = useState("");
   const [busy, setBusy] = useState(false);
@@ -51,6 +55,9 @@ export default function DiagnosticsPanel({
         id_token: token,
       });
       setResult(r);
+      if (r.claims && onClaimsDecoded) {
+        onClaimsDecoded(r.claims);
+      }
     } catch (e) {
       setResult({
         verified: false,

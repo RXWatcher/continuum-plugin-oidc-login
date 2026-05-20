@@ -13,6 +13,7 @@ import RoleMappingEditor, {
   type RoleMappingRule,
 } from "@/components/RoleMappingEditor";
 import DiagnosticsPanel from "@/components/DiagnosticsPanel";
+import ClaimSimulator from "@/components/ClaimSimulator";
 
 type ConfigSummary = {
   issuer_url: string;
@@ -52,6 +53,12 @@ export default function Admin() {
   });
   const [filters, setFilters] = useState<ClaimFilter[]>([]);
   const [mapping, setMapping] = useState<RoleMappingRule[]>([]);
+  // Decoded claims from the last successful DiagnosticsPanel verification.
+  // Lifted up here so ClaimSimulator can offer a "Use decoded claims" shortcut.
+  const [decodedClaims, setDecodedClaims] = useState<Record<
+    string,
+    unknown
+  > | null>(null);
 
   useEffect(() => {
     if (!cfgQ.data) return;
@@ -157,17 +164,35 @@ export default function Admin() {
         </CardContent>
       </Card>
 
-      <details className="bg-card border-border/70 rounded-md border p-4">
-        <summary className="cursor-pointer text-sm font-medium">
-          Diagnostics
-        </summary>
-        <div className="mt-3">
-          <DiagnosticsPanel
-            onUseAsFilter={useAsFilter}
-            onUseAsRoleMapping={useAsRoleMapping}
-          />
-        </div>
-      </details>
+      <Card>
+        <CardHeader>
+          <CardTitle>Diagnostics</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          <section className="space-y-2">
+            <h3 className="text-sm font-medium">Decode id_token</h3>
+            <p className="text-muted-foreground text-xs">
+              Paste a real id_token to verify it against the live JWKS and
+              browse its claims. Use the per-claim buttons to seed a filter
+              or role-mapping rule.
+            </p>
+            <DiagnosticsPanel
+              onUseAsFilter={useAsFilter}
+              onUseAsRoleMapping={useAsRoleMapping}
+              onClaimsDecoded={setDecodedClaims}
+            />
+          </section>
+          <section className="space-y-2">
+            <h3 className="text-sm font-medium">Simulate sign-in</h3>
+            <ClaimSimulator
+              filters={filters}
+              roleMapping={mapping}
+              emailVerifiedRequired={settings.email_verified_required}
+              seedClaims={decodedClaims}
+            />
+          </section>
+        </CardContent>
+      </Card>
 
       <div className="flex justify-end">
         <Button onClick={() => save.mutate()} disabled={save.isPending}>

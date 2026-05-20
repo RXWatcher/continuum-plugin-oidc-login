@@ -15,6 +15,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/ContinuumApp/continuum-plugin-oidc-login/internal/claims"
 	pluginoidc "github.com/ContinuumApp/continuum-plugin-oidc-login/internal/oidc"
 	pluginrt "github.com/ContinuumApp/continuum-plugin-oidc-login/internal/runtime"
 )
@@ -53,6 +54,7 @@ func (s *Server) Handler() http.Handler {
 		r.Patch("/api/v1/admin/config", s.handleUpdateConfig)
 		r.Get("/api/v1/admin/discovery", s.handleDiscovery)
 		r.Post("/api/v1/admin/decode-id-token", s.handleDecodeIDToken)
+		r.Post("/api/v1/admin/simulate-claims", s.handleSimulateClaims)
 	})
 	return r
 }
@@ -267,6 +269,101 @@ func (s *Server) handleDecodeIDToken(w http.ResponseWriter, r *http.Request) {
 	var c map[string]any
 	_ = idToken.Claims(&c)
 	writeJSON(w, http.StatusOK, map[string]any{"verified": true, "claims": c})
+}
+
+// simulateClaimsReq is the SPA-facing body for /simulate-claims. Filters,
+// RoleMapping, and EmailVerifiedRequired are pointers so the SPA can opt to
+// preview *unsaved* page state without persisting it — omit the field to fall
+// back to the live config.
+type simulateClaimsReq struct {
+	Claims                map[string]any              `json:"claims"`
+	Filters               *[]pluginrt.ClaimFilter     `json:"filters,omitempty"`
+	RoleMapping           *[]pluginrt.RoleMappingRule `json:"role_mapping,omitempty"`
+	EmailVerifiedRequired *bool                       `json:"email_verified_required,omitempty"`
+}
+
+// handleSimulateClaims runs the same filter / email_verified / role-mapping
+// pass that ExchangeCode applies after merging id_token + userinfo, but
+// against admin-supplied claims and (optionally) admin-supplied unsaved
+// rules. The response is a per-filter trace + the resolved role + the
+// identity that would be returned to the host. The SPA renders it as the
+// "Claim simulator" panel so admins can sanity-check their rules without
+// triggering a real OAuth dance.
+func (s *Server) handleSimulateClaims(w http.ResponseWriter, r *http.Request) {
+	var req simulateClaimsReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid JSON body"})
+		return
+	}
+	if req.Claims == nil {
+		req.Claims = map[string]any{}
+	}
+
+	cfg := s.deps.ConfigFn()
+	filters := cfg.ClaimFilters
+	if req.Filters != nil {
+		filters = *req.Filters
+	}
+	mapping := cfg.ClaimRoleMapping
+	if req.RoleMapping != nil {
+		mapping = *req.RoleMapping
+	}
+	emailRequired := cfg.EmailVerifiedRequired
+	if req.EmailVerifiedRequired != nil {
+		emailRequired = *req.EmailVerifiedRequired
+	}
+
+	filterTrace, filtersPassed := claims.TraceFilters(req.Claims, filters)
+
+	emailVerifiedValue, emailVerifiedFound := req.Claims["email_verified"]
+	emailPassed := true
+	if emailRequired {
+		if b, ok := emailVerifiedValue.(bool); ok && b {
+			emailPassed = true
+		} else {
+			emailPassed = false
+		}
+	}
+
+	role, ruleIdx := claims.TraceRole(req.Claims, mapping)
+
+	sub, _ := req.Claims["sub"].(string)
+	email, _ := req.Claims["email"].(string)
+	name, _ := req.Claims["name"].(string)
+	if name == "" {
+		first, _ := req.Claims["given_name"].(string)
+		last, _ := req.Claims["family_name"].(string)
+		switch {
+		case first != "" && last != "":
+			name = first + " " + last
+		case first != "":
+			name = first
+		case last != "":
+			name = last
+		default:
+			name = email
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"allowed":        filtersPassed && emailPassed && sub != "",
+		"filters_passed": filtersPassed,
+		"filter_trace":   filterTrace,
+		"email_verified_check": map[string]any{
+			"required":     emailRequired,
+			"claim_found":  emailVerifiedFound,
+			"claim_value":  emailVerifiedValue,
+			"passed":       emailPassed,
+		},
+		"sub_present":     sub != "",
+		"role":            role,
+		"role_rule_index": ruleIdx,
+		"identity": map[string]any{
+			"sub":   sub,
+			"email": email,
+			"name":  name,
+		},
+	})
 }
 
 func writeJSON(w http.ResponseWriter, code int, body any) {

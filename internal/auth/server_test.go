@@ -384,6 +384,105 @@ func TestExchangeCode_ClaimFilter_AcceptsMatchingGroup(t *testing.T) {
 	}
 }
 
+func TestExchangeCode_RoleMapping_AssignsAdminFromClaims(t *testing.T) {
+	idp := oidctest.NewIdP(t, "client-1")
+	cfg := pluginrt.Config{
+		ClientID: "client-1", ClientSecret: "s",
+		ClaimRoleMapping: []pluginrt.RoleMappingRule{
+			{ClaimPath: "groups", Operator: "contains", Value: "continuum-admins", Role: "admin"},
+		},
+	}
+	s := setupServer(t, cfg, idp)
+
+	code, _ := idp.IssueCode(t,
+		map[string]any{"sub": "u-9", "nonce": "n", "groups": []any{"continuum-admins"}, "email": "u@x.com", "email_verified": true},
+		map[string]any{"sub": "u-9", "email": "u@x.com"},
+		"access-tok-12345678",
+	)
+	pState, _ := structpb.NewStruct(map[string]any{"pkce_verifier": "v", "nonce": "n"})
+	resp, err := s.ExchangeCode(context.Background(), &pluginv1.ExchangeCodeRequest{
+		Code: code, State: "s", RedirectUri: "/cb", ProviderState: pState,
+	})
+	if err != nil {
+		t.Fatalf("ExchangeCode: %v", err)
+	}
+	claims := resp.GetClaims().AsMap()
+	if claims["continuum_role"] != "admin" {
+		t.Errorf("continuum_role = %v, want admin", claims["continuum_role"])
+	}
+}
+
+func TestExchangeCode_LinkByEmail_SetsLinkClaim(t *testing.T) {
+	idp := oidctest.NewIdP(t, "client-1")
+	cfg := pluginrt.Config{ClientID: "client-1", ClientSecret: "s", LinkByEmail: true}
+	s := setupServer(t, cfg, idp)
+
+	code, _ := idp.IssueCode(t,
+		map[string]any{"sub": "u-10", "nonce": "n", "email": "u@x.com", "email_verified": true},
+		map[string]any{"sub": "u-10", "email": "u@x.com"},
+		"access-tok-12345678",
+	)
+	pState, _ := structpb.NewStruct(map[string]any{"pkce_verifier": "v", "nonce": "n"})
+	resp, err := s.ExchangeCode(context.Background(), &pluginv1.ExchangeCodeRequest{
+		Code: code, State: "s", RedirectUri: "/cb", ProviderState: pState,
+	})
+	if err != nil {
+		t.Fatalf("ExchangeCode: %v", err)
+	}
+	if v, ok := resp.GetClaims().AsMap()["continuum_link_by_email"].(bool); !ok || !v {
+		t.Errorf("continuum_link_by_email = %v (want true)", resp.GetClaims().AsMap()["continuum_link_by_email"])
+	}
+}
+
+func TestExchangeCode_LinkByEmail_Disabled_OmitsLinkClaim(t *testing.T) {
+	idp := oidctest.NewIdP(t, "client-1")
+	cfg := pluginrt.Config{ClientID: "client-1", ClientSecret: "s", LinkByEmail: false}
+	s := setupServer(t, cfg, idp)
+
+	code, _ := idp.IssueCode(t,
+		map[string]any{"sub": "u-11", "nonce": "n", "email": "u@x.com", "email_verified": true},
+		map[string]any{"sub": "u-11", "email": "u@x.com"},
+		"access-tok-12345678",
+	)
+	pState, _ := structpb.NewStruct(map[string]any{"pkce_verifier": "v", "nonce": "n"})
+	resp, err := s.ExchangeCode(context.Background(), &pluginv1.ExchangeCodeRequest{
+		Code: code, State: "s", RedirectUri: "/cb", ProviderState: pState,
+	})
+	if err != nil {
+		t.Fatalf("ExchangeCode: %v", err)
+	}
+	if _, present := resp.GetClaims().AsMap()["continuum_link_by_email"]; present {
+		t.Errorf("continuum_link_by_email should be absent when LinkByEmail=false")
+	}
+}
+
+func TestExchangeCode_DefaultRoleIsUser_WhenNoMappingMatches(t *testing.T) {
+	idp := oidctest.NewIdP(t, "client-1")
+	cfg := pluginrt.Config{
+		ClientID: "client-1", ClientSecret: "s",
+		ClaimRoleMapping: []pluginrt.RoleMappingRule{
+			{ClaimPath: "groups", Operator: "contains", Value: "admins", Role: "admin"},
+		},
+	}
+	s := setupServer(t, cfg, idp)
+
+	code, _ := idp.IssueCode(t,
+		map[string]any{"sub": "u-12", "nonce": "n", "groups": []any{"random"}, "email": "u@x.com", "email_verified": true},
+		map[string]any{"sub": "u-12", "email": "u@x.com"},
+		"access-tok-12345678",
+	)
+	pState, _ := structpb.NewStruct(map[string]any{"pkce_verifier": "v", "nonce": "n"})
+	resp, err := s.ExchangeCode(context.Background(), &pluginv1.ExchangeCodeRequest{
+		Code: code, State: "s", RedirectUri: "/cb", ProviderState: pState,
+	})
+	if err != nil {
+		t.Fatalf("ExchangeCode: %v", err)
+	}
+	if got := resp.GetClaims().AsMap()["continuum_role"]; got != "user" {
+		t.Errorf("continuum_role = %v, want user (default fallback)", got)
+	}
+}
+
 func TestExchangeCode_MissingProviderState_Rejects(t *testing.T) {
 	idp := oidctest.NewIdP(t, "client-1")
 	cfg := pluginrt.Config{ClientID: "client-1", ClientSecret: "s"}
