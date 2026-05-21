@@ -109,7 +109,10 @@ Each install of the plugin gets its own `<install-id>` and therefore its own red
 
 ## Detailed docs
 
-- [Setup, debugging, and communication flows](docs/setup-debug-flows.md)
+- [Operations and debugging runbook](docs/setup-debug-flows.md) — flow internals, error → cause mapping, live debugging checklist.
+- [Claims, filters, and role mapping](docs/claims-and-roles.md) — semantics of paths, operators, AND filters, first-match role mapping.
+- [Admin panels](docs/admin-panels.md) — what Discovery, Diagnostics, and Claim Simulator do and when to use each.
+- [IdP cookbook](docs/idp-cookbook.md) — per-IdP gotchas (Authentik, Keycloak, Auth0, Okta, Google, Entra, GitLab).
 
 ## Build and release
 
