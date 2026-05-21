@@ -20,9 +20,9 @@ import (
 
 	pluginv1 "github.com/ContinuumApp/continuum-plugin-sdk/pkg/pluginproto/continuum/plugin/v1"
 
-	"github.com/ContinuumApp/continuum-plugin-oidc-login/internal/claims"
-	pluginoidc "github.com/ContinuumApp/continuum-plugin-oidc-login/internal/oidc"
-	pluginrt "github.com/ContinuumApp/continuum-plugin-oidc-login/internal/runtime"
+	"github.com/RXWatcher/continuum-plugin-oidc-login/internal/claims"
+	pluginoidc "github.com/RXWatcher/continuum-plugin-oidc-login/internal/oidc"
+	pluginrt "github.com/RXWatcher/continuum-plugin-oidc-login/internal/runtime"
 )
 
 // Server implements pluginv1.AuthProviderServer. Configuration and the OIDC

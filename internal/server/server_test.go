@@ -8,7 +8,7 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/ContinuumApp/continuum-plugin-oidc-login/internal/server"
+	"github.com/RXWatcher/continuum-plugin-oidc-login/internal/server"
 )
 
 func TestHealthOK(t *testing.T) {

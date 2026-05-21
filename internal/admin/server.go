@@ -15,9 +15,9 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/ContinuumApp/continuum-plugin-oidc-login/internal/claims"
-	pluginoidc "github.com/ContinuumApp/continuum-plugin-oidc-login/internal/oidc"
-	pluginrt "github.com/ContinuumApp/continuum-plugin-oidc-login/internal/runtime"
+	"github.com/RXWatcher/continuum-plugin-oidc-login/internal/claims"
+	pluginoidc "github.com/RXWatcher/continuum-plugin-oidc-login/internal/oidc"
+	pluginrt "github.com/RXWatcher/continuum-plugin-oidc-login/internal/runtime"
 )
 
 // maxResponseBytes caps outbound discovery/JWKS response bodies. Both

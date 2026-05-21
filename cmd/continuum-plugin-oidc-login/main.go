@@ -21,15 +21,15 @@ import (
 	publicmanifest "github.com/ContinuumApp/continuum-plugin-sdk/pkg/pluginsdk/manifest"
 	sdkruntime "github.com/ContinuumApp/continuum-plugin-sdk/pkg/pluginsdk/runtime"
 
-	"github.com/ContinuumApp/continuum-plugin-oidc-login/cmd/continuum-plugin-oidc-login/assets"
-	pluginadmin "github.com/ContinuumApp/continuum-plugin-oidc-login/internal/admin"
-	pluginauth "github.com/ContinuumApp/continuum-plugin-oidc-login/internal/auth"
-	"github.com/ContinuumApp/continuum-plugin-oidc-login/internal/httproutes"
-	pluginoidc "github.com/ContinuumApp/continuum-plugin-oidc-login/internal/oidc"
-	pluginrt "github.com/ContinuumApp/continuum-plugin-oidc-login/internal/runtime"
-	"github.com/ContinuumApp/continuum-plugin-oidc-login/internal/server"
-	"github.com/ContinuumApp/continuum-plugin-oidc-login/internal/store"
-	"github.com/ContinuumApp/continuum-plugin-oidc-login/web"
+	"github.com/RXWatcher/continuum-plugin-oidc-login/cmd/continuum-plugin-oidc-login/assets"
+	pluginadmin "github.com/RXWatcher/continuum-plugin-oidc-login/internal/admin"
+	pluginauth "github.com/RXWatcher/continuum-plugin-oidc-login/internal/auth"
+	"github.com/RXWatcher/continuum-plugin-oidc-login/internal/httproutes"
+	pluginoidc "github.com/RXWatcher/continuum-plugin-oidc-login/internal/oidc"
+	pluginrt "github.com/RXWatcher/continuum-plugin-oidc-login/internal/runtime"
+	"github.com/RXWatcher/continuum-plugin-oidc-login/internal/server"
+	"github.com/RXWatcher/continuum-plugin-oidc-login/internal/store"
+	"github.com/RXWatcher/continuum-plugin-oidc-login/web"
 )
 
 //go:embed manifest.json

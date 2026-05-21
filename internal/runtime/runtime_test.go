@@ -7,7 +7,7 @@ import (
 	pluginv1 "github.com/ContinuumApp/continuum-plugin-sdk/pkg/pluginproto/continuum/plugin/v1"
 	"google.golang.org/protobuf/types/known/structpb"
 
-	pluginrt "github.com/ContinuumApp/continuum-plugin-oidc-login/internal/runtime"
+	pluginrt "github.com/RXWatcher/continuum-plugin-oidc-login/internal/runtime"
 )
 
 func entry(key string, value any) *pluginv1.ConfigEntry {

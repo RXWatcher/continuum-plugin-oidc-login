@@ -1,4 +1,4 @@
-module github.com/ContinuumApp/continuum-plugin-oidc-login
+module github.com/RXWatcher/continuum-plugin-oidc-login
 
 go 1.26.0
 

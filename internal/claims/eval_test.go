@@ -3,8 +3,8 @@ package claims_test
 import (
 	"testing"
 
-	"github.com/ContinuumApp/continuum-plugin-oidc-login/internal/claims"
-	pluginrt "github.com/ContinuumApp/continuum-plugin-oidc-login/internal/runtime"
+	"github.com/RXWatcher/continuum-plugin-oidc-login/internal/claims"
+	pluginrt "github.com/RXWatcher/continuum-plugin-oidc-login/internal/runtime"
 )
 
 func TestEvaluateFilters_AllPass_AcceptsUser(t *testing.T) {

@@ -8,10 +8,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ContinuumApp/continuum-plugin-oidc-login/internal/admin"
-	pluginoidc "github.com/ContinuumApp/continuum-plugin-oidc-login/internal/oidc"
-	"github.com/ContinuumApp/continuum-plugin-oidc-login/internal/oidctest"
-	pluginrt "github.com/ContinuumApp/continuum-plugin-oidc-login/internal/runtime"
+	"github.com/RXWatcher/continuum-plugin-oidc-login/internal/admin"
+	pluginoidc "github.com/RXWatcher/continuum-plugin-oidc-login/internal/oidc"
+	"github.com/RXWatcher/continuum-plugin-oidc-login/internal/oidctest"
+	pluginrt "github.com/RXWatcher/continuum-plugin-oidc-login/internal/runtime"
 )
 
 func newAdmin(t *testing.T, cfg pluginrt.Config, idp *oidctest.IdP) *admin.Server {

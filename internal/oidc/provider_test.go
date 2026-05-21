@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	pluginoidc "github.com/ContinuumApp/continuum-plugin-oidc-login/internal/oidc"
+	pluginoidc "github.com/RXWatcher/continuum-plugin-oidc-login/internal/oidc"
 )
 
 // fakeIdP returns an httptest server that serves a minimal OIDC discovery doc

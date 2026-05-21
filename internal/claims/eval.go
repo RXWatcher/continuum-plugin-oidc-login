@@ -3,7 +3,7 @@ package claims
 import (
 	"errors"
 
-	pluginrt "github.com/ContinuumApp/continuum-plugin-oidc-login/internal/runtime"
+	pluginrt "github.com/RXWatcher/continuum-plugin-oidc-login/internal/runtime"
 )
 
 // ErrFilterRejected is returned by EvaluateFilters when at least one filter
