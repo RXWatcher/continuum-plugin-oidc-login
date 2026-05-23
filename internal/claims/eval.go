@@ -3,7 +3,7 @@ package claims
 import (
 	"errors"
 
-	pluginrt "github.com/RXWatcher/continuum-plugin-oidc-login/internal/runtime"
+	pluginrt "github.com/RXWatcher/silo-plugin-oidc-login/internal/runtime"
 )
 
 // ErrFilterRejected is returned by EvaluateFilters when at least one filter
@@ -27,7 +27,7 @@ func EvaluateFilters(c map[string]any, filters []pluginrt.ClaimFilter) error {
 }
 
 // ResolveRole walks rules in order; first match wins. Default: "user".
-// Continuum host applies this role on every login (via its existing
+// Silo host applies this role on every login (via its existing
 // role-mapping pass, fed by the merged claims this plugin returns).
 func ResolveRole(c map[string]any, rules []pluginrt.RoleMappingRule) string {
 	role, _ := TraceRole(c, rules)

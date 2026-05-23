@@ -1,4 +1,4 @@
-/continuum-plugin-oidc-login
+/silo-plugin-oidc-login
 *.test
 *.out
 .envrc

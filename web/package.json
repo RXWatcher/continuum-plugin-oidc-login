@@ -1,5 +1,5 @@
 {
-  "name": "continuum-plugin-oidc-login-web",
+  "name": "silo-plugin-oidc-login-web",
   "private": true,
   "version": "0.1.0",
   "type": "module",

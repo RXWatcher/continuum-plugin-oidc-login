@@ -130,10 +130,10 @@ func (s *Server) handleSPA(w http.ResponseWriter, r *http.Request) {
 	if strings.HasSuffix(rel, ".html") {
 		theme := r.URL.Query().Get("theme")
 		if theme == "" {
-			theme = r.Header.Get("X-Continuum-Theme")
+			theme = r.Header.Get("X-Silo-Theme")
 		}
 		if theme == "" {
-			theme = r.Header.Get("X-Continuum-User-Theme")
+			theme = r.Header.Get("X-Silo-User-Theme")
 		}
 		if theme == "" {
 			theme = "dark"

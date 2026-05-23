@@ -8,10 +8,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/RXWatcher/continuum-plugin-oidc-login/internal/admin"
-	pluginoidc "github.com/RXWatcher/continuum-plugin-oidc-login/internal/oidc"
-	"github.com/RXWatcher/continuum-plugin-oidc-login/internal/oidctest"
-	pluginrt "github.com/RXWatcher/continuum-plugin-oidc-login/internal/runtime"
+	"github.com/RXWatcher/silo-plugin-oidc-login/internal/admin"
+	pluginoidc "github.com/RXWatcher/silo-plugin-oidc-login/internal/oidc"
+	"github.com/RXWatcher/silo-plugin-oidc-login/internal/oidctest"
+	pluginrt "github.com/RXWatcher/silo-plugin-oidc-login/internal/runtime"
 )
 
 func newAdmin(t *testing.T, cfg pluginrt.Config, idp *oidctest.IdP) *admin.Server {
@@ -38,8 +38,8 @@ func TestWhoami_OpenToAnyAuthenticated(t *testing.T) {
 	s := newAdmin(t, pluginrt.Config{ClientID: "c", ClientSecret: "s"}, idp)
 
 	r := httptest.NewRequest("GET", "/api/v1/admin/whoami", nil)
-	r.Header.Set("X-Continuum-User-Id", "u-1")
-	r.Header.Set("X-Continuum-User-Role", "user") // not admin — still allowed
+	r.Header.Set("X-Silo-User-Id", "u-1")
+	r.Header.Set("X-Silo-User-Role", "user") // not admin — still allowed
 	w := httptest.NewRecorder()
 	s.Handler().ServeHTTP(w, r)
 	if w.Code != http.StatusOK {
@@ -73,7 +73,7 @@ func TestConfigSummary_GatedAndRedacts(t *testing.T) {
 
 	// Non-admin rejected.
 	r := httptest.NewRequest("GET", "/api/v1/admin/config-summary", nil)
-	r.Header.Set("X-Continuum-User-Role", "user")
+	r.Header.Set("X-Silo-User-Role", "user")
 	w := httptest.NewRecorder()
 	s.Handler().ServeHTTP(w, r)
 	if w.Code != http.StatusForbidden {
@@ -82,7 +82,7 @@ func TestConfigSummary_GatedAndRedacts(t *testing.T) {
 
 	// Admin OK.
 	r = httptest.NewRequest("GET", "/api/v1/admin/config-summary", nil)
-	r.Header.Set("X-Continuum-User-Role", "admin")
+	r.Header.Set("X-Silo-User-Role", "admin")
 	w = httptest.NewRecorder()
 	s.Handler().ServeHTTP(w, r)
 	if w.Code != http.StatusOK {
@@ -110,7 +110,7 @@ func TestDiscovery_FetchesLiveDoc(t *testing.T) {
 	s := newAdmin(t, pluginrt.Config{IssuerURL: idp.URL, ClientID: "c", ClientSecret: "s"}, idp)
 
 	r := httptest.NewRequest("GET", "/api/v1/admin/discovery", nil)
-	r.Header.Set("X-Continuum-User-Role", "admin")
+	r.Header.Set("X-Silo-User-Role", "admin")
 	w := httptest.NewRecorder()
 	s.Handler().ServeHTTP(w, r)
 	if w.Code != http.StatusOK {
@@ -141,7 +141,7 @@ func TestDiscovery_NoIssuer_ReturnsError(t *testing.T) {
 	})
 
 	r := httptest.NewRequest("GET", "/api/v1/admin/discovery", nil)
-	r.Header.Set("X-Continuum-User-Role", "admin")
+	r.Header.Set("X-Silo-User-Role", "admin")
 	w := httptest.NewRecorder()
 	s.Handler().ServeHTTP(w, r)
 	if w.Code == http.StatusOK {
@@ -167,7 +167,7 @@ func TestDiscovery_UnreachableIssuer_ReturnsErrorPayload(t *testing.T) {
 	_ = idp // keep linter happy
 
 	r := httptest.NewRequest("GET", "/api/v1/admin/discovery", nil)
-	r.Header.Set("X-Continuum-User-Role", "admin")
+	r.Header.Set("X-Silo-User-Role", "admin")
 	w := httptest.NewRecorder()
 	s.Handler().ServeHTTP(w, r)
 	if w.Code != http.StatusOK {
@@ -195,7 +195,7 @@ func TestDecodeIDToken_VerifiesAndReturnsClaims(t *testing.T) {
 
 	body, _ := json.Marshal(map[string]string{"id_token": idToken})
 	r := httptest.NewRequest("POST", "/api/v1/admin/decode-id-token", strings.NewReader(string(body)))
-	r.Header.Set("X-Continuum-User-Role", "admin")
+	r.Header.Set("X-Silo-User-Role", "admin")
 	r.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	s.Handler().ServeHTTP(w, r)
@@ -220,10 +220,10 @@ func TestSimulateClaims_UsesLiveConfig_AndAcceptsValidUser(t *testing.T) {
 		ClientID:     "client-1",
 		ClientSecret: "s",
 		ClaimFilters: []pluginrt.ClaimFilter{
-			{ClaimPath: "groups", Operator: "contains", Value: "continuum-users"},
+			{ClaimPath: "groups", Operator: "contains", Value: "silo-users"},
 		},
 		ClaimRoleMapping: []pluginrt.RoleMappingRule{
-			{ClaimPath: "groups", Operator: "contains", Value: "continuum-admins", Role: "admin"},
+			{ClaimPath: "groups", Operator: "contains", Value: "silo-admins", Role: "admin"},
 		},
 		EmailVerifiedRequired: true,
 	}
@@ -234,12 +234,12 @@ func TestSimulateClaims_UsesLiveConfig_AndAcceptsValidUser(t *testing.T) {
 			"sub":            "u-1",
 			"email":          "ada@example.com",
 			"email_verified": true,
-			"groups":         []any{"continuum-users", "continuum-admins"},
+			"groups":         []any{"silo-users", "silo-admins"},
 			"name":           "Ada",
 		},
 	})
 	r := httptest.NewRequest("POST", "/api/v1/admin/simulate-claims", strings.NewReader(string(body)))
-	r.Header.Set("X-Continuum-User-Role", "admin")
+	r.Header.Set("X-Silo-User-Role", "admin")
 	r.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	s.Handler().ServeHTTP(w, r)
@@ -267,7 +267,7 @@ func TestSimulateClaims_RejectsOnFilterMiss_AndReportsTrace(t *testing.T) {
 		ClientID:     "client-1",
 		ClientSecret: "s",
 		ClaimFilters: []pluginrt.ClaimFilter{
-			{ClaimPath: "groups", Operator: "contains", Value: "continuum-users"},
+			{ClaimPath: "groups", Operator: "contains", Value: "silo-users"},
 		},
 		EmailVerifiedRequired: false,
 	}
@@ -280,7 +280,7 @@ func TestSimulateClaims_RejectsOnFilterMiss_AndReportsTrace(t *testing.T) {
 		},
 	})
 	r := httptest.NewRequest("POST", "/api/v1/admin/simulate-claims", strings.NewReader(string(body)))
-	r.Header.Set("X-Continuum-User-Role", "admin")
+	r.Header.Set("X-Silo-User-Role", "admin")
 	r.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	s.Handler().ServeHTTP(w, r)
@@ -322,7 +322,7 @@ func TestSimulateClaims_BodyOverridesLiveConfig(t *testing.T) {
 		"email_verified_required": relax,
 	})
 	r := httptest.NewRequest("POST", "/api/v1/admin/simulate-claims", strings.NewReader(string(body)))
-	r.Header.Set("X-Continuum-User-Role", "admin")
+	r.Header.Set("X-Silo-User-Role", "admin")
 	r.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	s.Handler().ServeHTTP(w, r)
@@ -344,7 +344,7 @@ func TestSimulateClaims_NonAdmin_403(t *testing.T) {
 	idp := oidctest.NewIdP(t, "client-1")
 	s := newAdmin(t, pluginrt.Config{IssuerURL: idp.URL, ClientID: "client-1", ClientSecret: "s"}, idp)
 	r := httptest.NewRequest("POST", "/api/v1/admin/simulate-claims", strings.NewReader(`{"claims":{}}`))
-	r.Header.Set("X-Continuum-User-Role", "user")
+	r.Header.Set("X-Silo-User-Role", "user")
 	r.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	s.Handler().ServeHTTP(w, r)
@@ -359,7 +359,7 @@ func TestDecodeIDToken_BadTokenReportsError(t *testing.T) {
 
 	body, _ := json.Marshal(map[string]string{"id_token": "not.a.real.token"})
 	r := httptest.NewRequest("POST", "/api/v1/admin/decode-id-token", strings.NewReader(string(body)))
-	r.Header.Set("X-Continuum-User-Role", "admin")
+	r.Header.Set("X-Silo-User-Role", "admin")
 	r.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	s.Handler().ServeHTTP(w, r)

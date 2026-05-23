@@ -13,7 +13,7 @@ export type RoleMappingRule = {
 };
 
 // RoleMappingEditor adds a Role column to the ClaimFilterEditor shape.
-// Rules are evaluated by continuum host (and exported ResolveRole in the
+// Rules are evaluated by silo host (and exported ResolveRole in the
 // claims package) in order, with the first match winning. Default: user.
 export default function RoleMappingEditor({
   value,

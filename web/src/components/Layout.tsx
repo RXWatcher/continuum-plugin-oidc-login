@@ -29,7 +29,7 @@ export default function Layout() {
           You need an admin role to view this page.
         </p>
         <a href="/admin/plugins" className="mt-4 inline-block underline">
-          &larr; Back to Continuum plugins
+          &larr; Back to Silo plugins
         </a>
       </div>
     );
@@ -42,10 +42,10 @@ export default function Layout() {
           <a
             href="/admin/plugins"
             className="text-muted-foreground hover:bg-surface-hover hover:text-foreground inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-medium transition-colors"
-            title="Back to Continuum plugins"
+            title="Back to Silo plugins"
           >
             <ArrowLeft className="size-4" />
-            <span className="hidden sm:inline">Continuum</span>
+            <span className="hidden sm:inline">Silo</span>
           </a>
           <span className="text-border/60" aria-hidden>
             /

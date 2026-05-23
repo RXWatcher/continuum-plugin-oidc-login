@@ -4,10 +4,10 @@ import (
 	"strings"
 	"testing"
 
-	pluginv1 "github.com/ContinuumApp/continuum-plugin-sdk/pkg/pluginproto/continuum/plugin/v1"
+	pluginv1 "github.com/ContinuumApp/continuum-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
 	"google.golang.org/protobuf/types/known/structpb"
 
-	pluginrt "github.com/RXWatcher/continuum-plugin-oidc-login/internal/runtime"
+	pluginrt "github.com/RXWatcher/silo-plugin-oidc-login/internal/runtime"
 )
 
 func entry(key string, value any) *pluginv1.ConfigEntry {
@@ -248,7 +248,7 @@ func TestValidateClaimPath(t *testing.T) {
 		"realm_access.roles",
 		"a.b.c",
 		"_underscore",
-		"resource-access.continuum.roles",
+		"resource-access.silo.roles",
 	}
 	for _, p := range valid {
 		if err := pluginrt.ValidateClaimPath(p); err != nil {
@@ -295,12 +295,12 @@ func TestLoadConfig_RejectsBadClaimPath(t *testing.T) {
 
 func TestLoadConfig_FiltersAndMappingParse(t *testing.T) {
 	filters, _ := structpb.NewList([]any{
-		map[string]any{"claim_path": "groups", "operator": "contains", "value": "continuum-users"},
+		map[string]any{"claim_path": "groups", "operator": "contains", "value": "silo-users"},
 	})
 	fv, _ := structpb.NewStruct(map[string]any{"value": filters.AsSlice()})
 
 	rules, _ := structpb.NewList([]any{
-		map[string]any{"claim_path": "groups", "operator": "contains", "value": "continuum-admins", "role": "admin"},
+		map[string]any{"claim_path": "groups", "operator": "contains", "value": "silo-admins", "role": "admin"},
 	})
 	rv, _ := structpb.NewStruct(map[string]any{"value": rules.AsSlice()})
 

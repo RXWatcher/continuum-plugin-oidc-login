@@ -1,5 +1,5 @@
 // Package admin serves the plugin's admin HTTP endpoints. All endpoints under
-// /api/v1/admin/ are gated on X-Continuum-User-Role: admin, except whoami
+// /api/v1/admin/ are gated on X-Silo-User-Role: admin, except whoami
 // which is open to any authenticated user (it's how the SPA detects whether
 // the current user has access to the admin page).
 package admin
@@ -15,9 +15,9 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/RXWatcher/continuum-plugin-oidc-login/internal/claims"
-	pluginoidc "github.com/RXWatcher/continuum-plugin-oidc-login/internal/oidc"
-	pluginrt "github.com/RXWatcher/continuum-plugin-oidc-login/internal/runtime"
+	"github.com/RXWatcher/silo-plugin-oidc-login/internal/claims"
+	pluginoidc "github.com/RXWatcher/silo-plugin-oidc-login/internal/oidc"
+	pluginrt "github.com/RXWatcher/silo-plugin-oidc-login/internal/runtime"
 )
 
 // maxResponseBytes caps outbound discovery/JWKS response bodies. Both
@@ -119,12 +119,12 @@ func (s *Server) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
-// requireAdmin gates the wrapped handlers on X-Continuum-User-Role: admin.
-// The continuum host stamps these headers on every authenticated request to
+// requireAdmin gates the wrapped handlers on X-Silo-User-Role: admin.
+// The silo host stamps these headers on every authenticated request to
 // plugin routes; absence (or non-admin) is rejected with 403.
 func (s *Server) requireAdmin(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("X-Continuum-User-Role") != "admin" {
+		if r.Header.Get("X-Silo-User-Role") != "admin" {
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}
@@ -137,9 +137,9 @@ func (s *Server) requireAdmin(next http.Handler) http.Handler {
 func (s *Server) handleWhoami(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
-		"user_id": r.Header.Get("X-Continuum-User-Id"),
-		"role":    r.Header.Get("X-Continuum-User-Role"),
-		"theme":   r.Header.Get("X-Continuum-User-Theme"),
+		"user_id": r.Header.Get("X-Silo-User-Id"),
+		"role":    r.Header.Get("X-Silo-User-Role"),
+		"theme":   r.Header.Get("X-Silo-User-Theme"),
 	})
 }
 

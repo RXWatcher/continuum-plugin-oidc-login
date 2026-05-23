@@ -34,7 +34,7 @@ The login dance is six hops. Knowing exactly which hop is failing is the entire 
 - `InitAuthorize` mints a fresh PKCE verifier (48 random bytes → base64url) and a 32-byte nonce per attempt. Verifier never leaves the plugin process; only the S256 challenge goes to the IdP.
 - The redirect URI is supplied by the host per call (`req.GetRedirectUri()`) and overlaid on the cached `oauth2.Config`. Shape:
   ```
-  https://<continuum-host>/api/v1/auth/oauth/<install-id>/callback
+  https://<silo-host>/api/v1/auth/oauth/<install-id>/callback
   ```
   Every install gets its own `<install-id>`. If you reinstall the plugin you get a new ID; the old redirect URI registered with the IdP becomes dead weight and the new one must be registered before the first login attempt.
 - The state value comes from the host and is round-tripped via `provider_state`. The plugin's stash also includes `pkce_verifier` and `nonce`.
@@ -70,18 +70,18 @@ The login dance is six hops. Knowing exactly which hop is failing is the entire 
 - Three local passes after the merge, in order:
   1. `email_verified_required` (default true). The merged claim must be the boolean `true`. The string `"true"` does **not** pass — IdPs vary on this and the plugin enforces the OIDC spec. If your IdP only ever emits the string form, flip `email_verified_required` to false and add a `claim_filters` rule that checks for the string value instead.
   2. `claim_filters` — AND across rules. Missing claim path = failed match. First failure short-circuits.
-  3. Role mapping — first match wins; default `user`. Written into `merged["continuum_role"]`. The host applies its own role-mapping pass on top, but it consults `continuum_role` as a hint.
-- `link_by_email=true` writes `merged["continuum_link_by_email"] = true`. The host reads that flag and may link to an existing Continuum user with the same email. **The plugin itself never matches users — linking is entirely a host decision.**
+  3. Role mapping — first match wins; default `user`. Written into `merged["silo_role"]`. The host applies its own role-mapping pass on top, but it consults `silo_role` as a hint.
+- `link_by_email=true` writes `merged["silo_link_by_email"] = true`. The host reads that flag and may link to an existing Silo user with the same email. **The plugin itself never matches users — linking is entirely a host decision.**
 
 ## Per-install redirect URI
 
-Two installs of this plugin = two `<install-id>` values = two independent redirect URIs. That's why the docs say "install once per IdP": the IdP doesn't know about Continuum's install IDs, so two installs pointed at the same IdP with the same client would both have valid registrations but each would receive callbacks aimed at the other. The redirect URI is the disambiguator.
+Two installs of this plugin = two `<install-id>` values = two independent redirect URIs. That's why the docs say "install once per IdP": the IdP doesn't know about Silo's install IDs, so two installs pointed at the same IdP with the same client would both have valid registrations but each would receive callbacks aimed at the other. The redirect URI is the disambiguator.
 
 If you genuinely need two installs against the same IdP (e.g. different audiences), use two OAuth **clients** on the IdP side and register the matching redirect URI for each install separately.
 
 ## Error → likely cause cheatsheet
 
-The plugin maps every failure path to a gRPC status code. Continuum surfaces these in its auth audit log; you can also pull them from plugin process logs.
+The plugin maps every failure path to a gRPC status code. Silo surfaces these in its auth audit log; you can also pull them from plugin process logs.
 
 | gRPC code | Plugin message | Where it comes from | What to check |
 | --- | --- | --- | --- |
@@ -102,16 +102,16 @@ The plugin maps every failure path to a gRPC status code. Continuum surfaces the
 ## `email_verified_required` and `link_by_email` semantics
 
 - `email_verified_required` (default `true`): the merged claim must be the literal boolean `true`. JSON `true` from id_token or userinfo both work. String `"true"`, integer `1`, or missing claim all fail. If your IdP emits strings only, set this to `false` and add `{"claim_path": "email_verified", "operator": "equals", "value": "true"}` to `claim_filters` instead — that gives you the same effective gate while sidestepping the type mismatch.
-- `link_by_email` (default `false`): when `true`, the plugin tags returned claims with `continuum_link_by_email=true`. The host uses that as permission to link this external login to a Continuum user whose email already exists. **Only enable this if you trust that the IdP's `email` claim is verified and unique.** Auth0, Google, and Microsoft personal accounts can all let users sign up with arbitrary emails — enabling link-by-email against an untrusted IdP is account takeover.
+- `link_by_email` (default `false`): when `true`, the plugin tags returned claims with `silo_link_by_email=true`. The host uses that as permission to link this external login to a Silo user whose email already exists. **Only enable this if you trust that the IdP's `email` claim is verified and unique.** Auth0, Google, and Microsoft personal accounts can all let users sign up with arbitrary emails — enabling link-by-email against an untrusted IdP is account takeover.
 
 ## Common operator-side failure patterns
 
 - Reverse proxy rule forwards `/admin/*` and `/api/v1/admin/*` but not `/api/v1/auth/oauth/<install-id>/callback` — login looks broken but admin UI works. The callback is owned by the host, not the plugin, so the rule needs to cover the host's auth router too.
-- `database_url` points at the shared `public` schema. Migrations succeed (the schema's there), but you've polluted shared tables and other plugins/Continuum core may collide. Use a dedicated `oidc_login` schema; the DSN should include `search_path=oidc_login` (see manifest description).
+- `database_url` points at the shared `public` schema. Migrations succeed (the schema's there), but you've polluted shared tables and other plugins/Silo core may collide. Use a dedicated `oidc_login` schema; the DSN should include `search_path=oidc_login` (see manifest description).
 - Operator runs `curl` against `<issuer>/.well-known/openid-configuration` from their laptop, sees a 200, and concludes discovery should work. Discovery runs from the **plugin runtime** network. Use the admin Discovery panel.
 - `email_verified` is the boolean `false` (user signed up but never confirmed). `email_verified_required=true` rejects them; nothing in the logs distinguishes "claim missing" from "claim is false" other than the message. Use the Claim simulator with the user's decoded id_token to see which it is.
 - After reinstalling the plugin, the redirect URI changed (new `<install-id>`) but nobody updated the IdP. First login attempt fails with whatever the IdP's "unknown redirect_uri" error looks like — usually a generic IdP error before the plugin is ever invoked.
-- Secrets rotate on host restart, invalidating encrypted `client_secret`. This shouldn't happen with a stable Continuum install but does happen in dev when the host's secret-encryption key isn't pinned. Symptom: discovery still works (issuer is plaintext) but token exchange fails with `unauthorized_client`.
+- Secrets rotate on host restart, invalidating encrypted `client_secret`. This shouldn't happen with a stable Silo install but does happen in dev when the host's secret-encryption key isn't pinned. Symptom: discovery still works (issuer is plaintext) but token exchange fails with `unauthorized_client`.
 
 ## Live debugging checklist
 

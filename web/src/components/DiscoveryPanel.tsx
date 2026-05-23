@@ -142,7 +142,7 @@ function JWKSTable({ keys }: { keys: JWKSKey[] }) {
       </table>
       <p className="text-muted-foreground text-xs">
         After rotating keys at the IdP, click <em>Refresh</em> and confirm the
-        kid set changed. Continuum verifies id_tokens with whatever the JWKS
+        kid set changed. Silo verifies id_tokens with whatever the JWKS
         endpoint advertises right now.
       </p>
     </div>

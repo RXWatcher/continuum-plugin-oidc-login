@@ -4,7 +4,7 @@ Each IdP has its own quirks around issuer paths, group claims, and how it spells
 
 Common to all of them:
 
-- The redirect URI registered with the IdP must be `https://<continuum-host>/api/v1/auth/oauth/<install-id>/callback`. Exact-string match. Get the `<install-id>` from the Continuum admin → Plugins detail page.
+- The redirect URI registered with the IdP must be `https://<silo-host>/api/v1/auth/oauth/<install-id>/callback`. Exact-string match. Get the `<install-id>` from the Silo admin → Plugins detail page.
 - Scopes must include `openid`. The plugin defaults to `openid profile email`; add IdP-specific scopes (e.g. `groups`) as needed.
 - The IdP must publish a valid `/.well-known/openid-configuration` and a JWKS. The admin Discovery panel will tell you whether this is true from inside the plugin runtime.
 
@@ -46,7 +46,7 @@ Common to all of them:
   ```
   `hd` is only present for Workspace accounts; consumer `@gmail.com` accounts won't have it, so this filter doubles as "Workspace-only".
 - **email_verified**: boolean, almost always true.
-- **link_by_email**: safe **only** if you also gate on `hd`. Without `hd`, anyone with a Gmail account matching an existing Continuum email would be linked.
+- **link_by_email**: safe **only** if you also gate on `hd`. Without `hd`, anyone with a Gmail account matching an existing Silo email would be linked.
 
 ## Microsoft Entra ID (Azure AD)
 
@@ -69,7 +69,7 @@ Common to all of them:
 If your IdP isn't listed:
 
 1. Use the Discovery panel to confirm the discovery doc and JWKS are reachable.
-2. Trigger one real login and capture the id_token (Continuum auth audit log at debug level).
+2. Trigger one real login and capture the id_token (Silo auth audit log at debug level).
 3. Paste it into the Diagnostics panel — confirm the claim shape and which claims live in id_token vs. userinfo.
 4. Write your filter and role-mapping rules against that claim set, run them through the Claim simulator before saving.
 

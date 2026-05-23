@@ -71,7 +71,7 @@ export default function IconPicker({
           placeholder="https://example.com/icon.svg or /assets/custom.svg"
         />
         <p className="text-muted-foreground text-xs">
-          Use a hosted HTTPS icon or a root-relative path served by Continuum.
+          Use a hosted HTTPS icon or a root-relative path served by Silo.
         </p>
       </div>
     </div>

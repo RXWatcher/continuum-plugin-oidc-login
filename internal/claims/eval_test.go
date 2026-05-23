@@ -3,17 +3,17 @@ package claims_test
 import (
 	"testing"
 
-	"github.com/RXWatcher/continuum-plugin-oidc-login/internal/claims"
-	pluginrt "github.com/RXWatcher/continuum-plugin-oidc-login/internal/runtime"
+	"github.com/RXWatcher/silo-plugin-oidc-login/internal/claims"
+	pluginrt "github.com/RXWatcher/silo-plugin-oidc-login/internal/runtime"
 )
 
 func TestEvaluateFilters_AllPass_AcceptsUser(t *testing.T) {
 	c := map[string]any{
-		"groups":         []any{"continuum-users", "engineering"},
+		"groups":         []any{"silo-users", "engineering"},
 		"email_verified": true,
 	}
 	filters := []pluginrt.ClaimFilter{
-		{ClaimPath: "groups", Operator: "contains", Value: "continuum-users"},
+		{ClaimPath: "groups", Operator: "contains", Value: "silo-users"},
 		{ClaimPath: "email_verified", Operator: "equals", Value: true},
 	}
 	if err := claims.EvaluateFilters(c, filters); err != nil {
@@ -24,7 +24,7 @@ func TestEvaluateFilters_AllPass_AcceptsUser(t *testing.T) {
 func TestEvaluateFilters_OneFails_RejectsUser(t *testing.T) {
 	c := map[string]any{"groups": []any{"other"}}
 	filters := []pluginrt.ClaimFilter{
-		{ClaimPath: "groups", Operator: "contains", Value: "continuum-users"},
+		{ClaimPath: "groups", Operator: "contains", Value: "silo-users"},
 	}
 	if err := claims.EvaluateFilters(c, filters); err == nil {
 		t.Error("expected rejection")
@@ -34,7 +34,7 @@ func TestEvaluateFilters_OneFails_RejectsUser(t *testing.T) {
 func TestEvaluateFilters_MissingClaim_RejectsUser(t *testing.T) {
 	c := map[string]any{"sub": "u-1"}
 	filters := []pluginrt.ClaimFilter{
-		{ClaimPath: "groups", Operator: "contains", Value: "continuum-users"},
+		{ClaimPath: "groups", Operator: "contains", Value: "silo-users"},
 	}
 	if err := claims.EvaluateFilters(c, filters); err == nil {
 		t.Error("missing claim should reject")
@@ -48,10 +48,10 @@ func TestEvaluateFilters_EmptyList_NoGating(t *testing.T) {
 }
 
 func TestResolveRole_FirstMatchWins(t *testing.T) {
-	c := map[string]any{"groups": []any{"continuum-admins", "continuum-users"}}
+	c := map[string]any{"groups": []any{"silo-admins", "silo-users"}}
 	rules := []pluginrt.RoleMappingRule{
-		{ClaimPath: "groups", Operator: "contains", Value: "continuum-admins", Role: "admin"},
-		{ClaimPath: "groups", Operator: "contains", Value: "continuum-users", Role: "user"},
+		{ClaimPath: "groups", Operator: "contains", Value: "silo-admins", Role: "admin"},
+		{ClaimPath: "groups", Operator: "contains", Value: "silo-users", Role: "user"},
 	}
 	if got := claims.ResolveRole(c, rules); got != "admin" {
 		t.Errorf("ResolveRole = %q, want admin", got)
@@ -76,11 +76,11 @@ func TestResolveRole_EmptyRules_DefaultsToUser(t *testing.T) {
 
 func TestTraceFilters_RunsAllFilters_AndReportsPerFilterMatch(t *testing.T) {
 	c := map[string]any{
-		"groups":         []any{"continuum-users"},
+		"groups":         []any{"silo-users"},
 		"email_verified": true,
 	}
 	filters := []pluginrt.ClaimFilter{
-		{ClaimPath: "groups", Operator: "contains", Value: "continuum-users"},
+		{ClaimPath: "groups", Operator: "contains", Value: "silo-users"},
 		{ClaimPath: "groups", Operator: "contains", Value: "missing-group"},
 		{ClaimPath: "email_verified", Operator: "equals", Value: true},
 	}
@@ -128,10 +128,10 @@ func TestTraceFilters_EmptyList_PassesWithEmptyTrace(t *testing.T) {
 }
 
 func TestTraceRole_ReturnsMatchedIndex(t *testing.T) {
-	c := map[string]any{"groups": []any{"continuum-admins"}}
+	c := map[string]any{"groups": []any{"silo-admins"}}
 	rules := []pluginrt.RoleMappingRule{
 		{ClaimPath: "groups", Operator: "contains", Value: "engineering", Role: "user"},
-		{ClaimPath: "groups", Operator: "contains", Value: "continuum-admins", Role: "admin"},
+		{ClaimPath: "groups", Operator: "contains", Value: "silo-admins", Role: "admin"},
 	}
 	role, idx := claims.TraceRole(c, rules)
 	if role != "admin" || idx != 1 {
@@ -151,11 +151,11 @@ func TestTraceRole_NoMatch_ReturnsMinusOne(t *testing.T) {
 func TestResolveRole_NestedPath(t *testing.T) {
 	c := map[string]any{
 		"realm_access": map[string]any{
-			"roles": []any{"continuum-admin"},
+			"roles": []any{"silo-admin"},
 		},
 	}
 	rules := []pluginrt.RoleMappingRule{
-		{ClaimPath: "realm_access.roles", Operator: "contains", Value: "continuum-admin", Role: "admin"},
+		{ClaimPath: "realm_access.roles", Operator: "contains", Value: "silo-admin", Role: "admin"},
 	}
 	if got := claims.ResolveRole(c, rules); got != "admin" {
 		t.Errorf("nested = %q", got)

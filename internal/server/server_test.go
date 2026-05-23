@@ -8,7 +8,7 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/RXWatcher/continuum-plugin-oidc-login/internal/server"
+	"github.com/RXWatcher/silo-plugin-oidc-login/internal/server"
 )
 
 func TestHealthOK(t *testing.T) {
@@ -84,7 +84,7 @@ func TestSPAIndexHTMLThemeInjected(t *testing.T) {
 	}
 	s := server.New(server.Deps{WebFS: fsys})
 	r := httptest.NewRequest("GET", "/admin", nil)
-	r.Header.Set("X-Continuum-User-Theme", "cinema-light")
+	r.Header.Set("X-Silo-User-Theme", "cinema-light")
 	w := httptest.NewRecorder()
 	s.Handler().ServeHTTP(w, r)
 	if w.Code != http.StatusOK {

@@ -30,8 +30,8 @@ if (params.has("token")) {
   window.history.replaceState(null, "", url);
 }
 
-// Apply continuum's theme to the plugin's <html> so semantic Tailwind classes
-// inherit continuum's palette.
+// Apply silo's theme to the plugin's <html> so semantic Tailwind classes
+// inherit silo's palette.
 const theme = getCachedTheme();
 if (theme) {
   document.documentElement.dataset.theme = theme;

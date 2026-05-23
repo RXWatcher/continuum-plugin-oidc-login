@@ -9,8 +9,8 @@ Every filter and role rule evaluates against a single `map[string]any` produced 
 1. Start with the verified `id_token` claims.
 2. Overlay userinfo claims; userinfo wins on collisions.
 3. Plugin-generated claims are added last by the gate/map pass:
-   - `continuum_role` — the resolved role string.
-   - `continuum_link_by_email` — present only when `link_by_email=true`.
+   - `silo_role` — the resolved role string.
+   - `silo_link_by_email` — present only when `link_by_email=true`.
 
 Filters and role mapping run against this combined object, so you can match on values that exist only in userinfo (`groups` on Authentik, for instance) and on id_token-only claims interchangeably.
 
@@ -97,7 +97,7 @@ First-match-wins walk through `rules` in array order. The first rule whose claim
 
 - Default role: `user`. Returned when no rule matches.
 - Allowed roles: `user` or `admin` only. Validation rejects anything else at Configure time.
-- The role string is written into the merged claims as `continuum_role`. The host's own role-mapping pass reads it as a hint — the host has final say on what role the Continuum user ends up with.
+- The role string is written into the merged claims as `silo_role`. The host's own role-mapping pass reads it as a hint — the host has final say on what role the Silo user ends up with.
 
 ### Ordering matters
 
@@ -105,9 +105,9 @@ Put most-specific rules first. A common shape:
 
 ```json
 [
-  {"claim_path": "groups", "operator": "contains", "value": "continuum-admins", "role": "admin"},
-  {"claim_path": "groups", "operator": "contains", "value": "continuum-staff",  "role": "admin"},
-  {"claim_path": "groups", "operator": "contains", "value": "continuum-users",  "role": "user"}
+  {"claim_path": "groups", "operator": "contains", "value": "silo-admins", "role": "admin"},
+  {"claim_path": "groups", "operator": "contains", "value": "silo-staff",  "role": "admin"},
+  {"claim_path": "groups", "operator": "contains", "value": "silo-users",  "role": "user"}
 ]
 ```
 

@@ -2,7 +2,7 @@
 
 The plugin's admin SPA at `/admin` exposes three diagnostic panels in addition to the settings/claim-filter/role-mapping editors. They exist so an operator can answer "is this thing working?" without needing to trigger a real OAuth flow against the live IdP.
 
-All three panels are admin-only (`X-Continuum-User-Role: admin`); they live behind `requireAdmin` in `internal/admin/server.go`.
+All three panels are admin-only (`X-Silo-User-Role: admin`); they live behind `requireAdmin` in `internal/admin/server.go`.
 
 ## Discovery panel
 
@@ -46,7 +46,7 @@ Response: `{"verified": true|false, "claims": {...}|null, "error": "..."}`. Veri
 
 Where to get an id_token to paste:
 
-- Continuum's auth audit log at debug log level captures id_tokens for failed/rejected logins.
+- Silo's auth audit log at debug log level captures id_tokens for failed/rejected logins.
 - The IdP's own user dashboard (Authentik, Keycloak admin console) can usually issue one on demand.
 - An end-to-end OAuth dance done with a tool like `oidc-client` if you have a developer console.
 
@@ -108,4 +108,4 @@ The simulator runs entirely server-side using the same `internal/claims.TraceFil
 
 - They do not contact the IdP's token endpoint. Token-exchange errors (`oauth2: cannot fetch token`) only show up in a real login attempt or in plugin process logs.
 - They do not test the redirect URI registration. The Discovery panel confirms the IdP is reachable, but only an actual login (or an explicit `curl` from the IdP side) confirms the redirect URI is registered correctly.
-- They do not exercise the host's session creation or role mapping. The simulator returns the claims the plugin *would* hand to the host; what the host does with `continuum_role` and `continuum_link_by_email` is its own concern.
+- They do not exercise the host's session creation or role mapping. The simulator returns the claims the plugin *would* hand to the host; what the host does with `silo_role` and `silo_link_by_email` is its own concern.

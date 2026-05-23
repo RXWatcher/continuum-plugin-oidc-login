@@ -1,12 +1,12 @@
-# OIDC Login for Continuum
+# OIDC Login for Silo
 
-`continuum.oidc-login` is a generic OpenID Connect authentication provider for Continuum. It is multi-instance by design — install one copy per identity provider (Authentik, Keycloak, Auth0, Okta, Google, Microsoft Entra ID, GitLab, or any IdP that publishes standard OIDC discovery metadata).
+`silo.oidc-login` is a generic OpenID Connect authentication provider for Silo. It is multi-instance by design — install one copy per identity provider (Authentik, Keycloak, Auth0, Okta, Google, Microsoft Entra ID, GitLab, or any IdP that publishes standard OIDC discovery metadata).
 
-Reach for [`continuum.whmcs-login`](https://github.com/RXWatcher/continuum-plugin-whmcs-login) instead when WHMCS billing is your source of identity; this plugin is for IdPs that expose `/.well-known/openid-configuration` and JWKS-signed ID tokens.
+Reach for [`silo.whmcs-login`](https://github.com/RXWatcher/silo-plugin-whmcs-login) instead when WHMCS billing is your source of identity; this plugin is for IdPs that expose `/.well-known/openid-configuration` and JWKS-signed ID tokens.
 
 ## Category
 
-Lives under **Auth** in the Continuum plugin catalog.
+Lives under **Auth** in the Silo plugin catalog.
 
 ## Capabilities
 
@@ -27,11 +27,11 @@ Declared HTTP routes:
 
 ## Dependencies
 
-- Standalone auth provider. Plugs into the Continuum host's `auth_provider.v1` plane; the host owns session creation and applies role mappings against the claims this plugin returns.
+- Standalone auth provider. Plugs into the Silo host's `auth_provider.v1` plane; the host owns session creation and applies role mappings against the claims this plugin returns.
 - A Postgres connection string (`database_url` in global config) is required. The plugin runs migrations on its dedicated `oidc_login` schema and uses it for persisted settings and claim/role rules.
 - Built against [`continuum-plugin-sdk`](https://github.com/ContinuumApp/continuum-plugin-sdk) (Runtime, HttpRoutes, AuthProvider servers) and serves via the SDK runtime loop.
 
-Host: [`ContinuumApp/continuum`](https://github.com/ContinuumApp/continuum).
+Host: [`ContinuumApp/silo`](https://github.com/ContinuumApp/silo).
 
 ## External services
 
@@ -46,12 +46,12 @@ No other outbound dependencies.
 
 ## Auth flow
 
-1. The user picks this provider on the Continuum login screen; the host calls `InitAuthorize`.
+1. The user picks this provider on the Silo login screen; the host calls `InitAuthorize`.
 2. The plugin mints a fresh PKCE verifier (S256) and `nonce`, builds the authorize URL from the discovered `authorization_endpoint`, and returns it along with `provider_state` (pkce_verifier + nonce + state).
-3. The IdP redirects back to `https://<continuum-host>/api/v1/auth/oauth/<install-id>/callback` with `code` and `state`.
+3. The IdP redirects back to `https://<silo-host>/api/v1/auth/oauth/<install-id>/callback` with `code` and `state`.
 4. The host calls `ExchangeCode`. The plugin verifies the callback `state` (constant-time) against `provider_state`, exchanges the code with PKCE, verifies the ID token against JWKS (issuer, audience, expiry, signature), checks the nonce, and best-effort fetches userinfo (subject must match).
 5. ID token claims and userinfo are merged (userinfo wins on collision). Optional `email_verified` enforcement and `claim_filters` gating run here.
-6. The plugin returns `external_subject`, display name, email, and the merged claim set to the host. The host then applies its own role-mapping pass using the `continuum_role` hint (and `continuum_link_by_email` when enabled) that this plugin attaches to the claims.
+6. The plugin returns `external_subject`, display name, email, and the merged claim set to the host. The host then applies its own role-mapping pass using the `silo_role` hint (and `silo_link_by_email` when enabled) that this plugin attaches to the claims.
 
 ## Claim filters and role mapping
 
@@ -73,10 +73,10 @@ Example — gate sign-in to a group, elevate one group to admin:
 ```json
 {
   "claim_filters": [
-    {"claim_path": "groups", "operator": "contains", "value": "continuum-users"}
+    {"claim_path": "groups", "operator": "contains", "value": "silo-users"}
   ],
   "claim_role_mapping": [
-    {"claim_path": "groups", "operator": "contains", "value": "continuum-admins", "role": "admin"}
+    {"claim_path": "groups", "operator": "contains", "value": "silo-admins", "role": "admin"}
   ]
 }
 ```
@@ -97,12 +97,12 @@ Global config is loaded by `internal/runtime` and stored in the plugin's own Pos
 | `claim_filters` | no | JSON array of `{claim_path, operator, value}` rules. AND semantics. |
 | `claim_role_mapping` | no | JSON array of `{claim_path, operator, value, role}` rules. First-match wins; default `user`. |
 | `email_verified_required` | no | Reject ID tokens with `email_verified=false`. Defaults to `true`. |
-| `link_by_email` | no | When set, the plugin attaches `continuum_link_by_email=true` to the returned claims so the host can link to an existing Continuum user with the same email. Defaults to `false`. |
+| `link_by_email` | no | When set, the plugin attaches `silo_link_by_email=true` to the returned claims so the host can link to an existing Silo user with the same email. Defaults to `false`. |
 
 Redirect URI to register with the identity provider:
 
 ```text
-https://<continuum-host>/api/v1/auth/oauth/<install-id>/callback
+https://<silo-host>/api/v1/auth/oauth/<install-id>/callback
 ```
 
 Each install of the plugin gets its own `<install-id>` and therefore its own redirect URI — that's what makes the "install once per IdP" model work without collisions.
@@ -121,4 +121,4 @@ make build      # builds the SPA (pnpm) then the Go binary
 make test       # go test ./... + pnpm run test --run
 ```
 
-CI builds linux-amd64 binaries on push to main via the reusable workflow in [RXWatcher/continuum-plugin-repository](https://github.com/RXWatcher/continuum-plugin-repository) and publishes them to the catalog at [`./binaries/`](https://github.com/RXWatcher/continuum-plugin-repository/tree/main/binaries).
+CI builds linux-amd64 binaries on push to main via the reusable workflow in [RXWatcher/silo-plugin-repository](https://github.com/RXWatcher/silo-plugin-repository) and publishes them to the catalog at [`./binaries/`](https://github.com/RXWatcher/silo-plugin-repository/tree/main/binaries).

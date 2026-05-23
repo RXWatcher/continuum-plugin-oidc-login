@@ -44,7 +44,7 @@ const EXAMPLE_CLAIMS = JSON.stringify(
     name: "Ada Lovelace",
     given_name: "Ada",
     family_name: "Lovelace",
-    groups: ["continuum-users", "engineering"],
+    groups: ["silo-users", "engineering"],
     realm_access: { roles: ["operator"] },
   },
   null,

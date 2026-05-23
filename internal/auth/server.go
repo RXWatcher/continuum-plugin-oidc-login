@@ -18,11 +18,11 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/structpb"
 
-	pluginv1 "github.com/ContinuumApp/continuum-plugin-sdk/pkg/pluginproto/continuum/plugin/v1"
+	pluginv1 "github.com/ContinuumApp/continuum-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
 
-	"github.com/RXWatcher/continuum-plugin-oidc-login/internal/claims"
-	pluginoidc "github.com/RXWatcher/continuum-plugin-oidc-login/internal/oidc"
-	pluginrt "github.com/RXWatcher/continuum-plugin-oidc-login/internal/runtime"
+	"github.com/RXWatcher/silo-plugin-oidc-login/internal/claims"
+	pluginoidc "github.com/RXWatcher/silo-plugin-oidc-login/internal/oidc"
+	pluginrt "github.com/RXWatcher/silo-plugin-oidc-login/internal/runtime"
 )
 
 // Server implements pluginv1.AuthProviderServer. Configuration and the OIDC
@@ -190,9 +190,9 @@ func (s *Server) ExchangeCode(ctx context.Context, req *pluginv1.ExchangeCodeReq
 	if err := claims.EvaluateFilters(merged, cfg.ClaimFilters); err != nil {
 		return nil, status.Error(codes.PermissionDenied, "claim filter rejected")
 	}
-	merged["continuum_role"] = claims.ResolveRole(merged, cfg.ClaimRoleMapping)
+	merged["silo_role"] = claims.ResolveRole(merged, cfg.ClaimRoleMapping)
 	if cfg.LinkByEmail {
-		merged["continuum_link_by_email"] = true
+		merged["silo_link_by_email"] = true
 	}
 
 	sub, _ := merged["sub"].(string)

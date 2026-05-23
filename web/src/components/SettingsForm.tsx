@@ -159,10 +159,10 @@ export default function SettingsForm({
             <div className="space-y-1">
               <div className="font-medium">Account-linking enabled</div>
               <p>
-                Continuum will merge a sign-in into an existing local account
+                Silo will merge a sign-in into an existing local account
                 whenever the IdP's <span className="font-mono">email</span>{" "}
                 claim matches. If the IdP doesn't strictly verify email
-                addresses, anyone able to claim a Continuum user's email at
+                addresses, anyone able to claim a Silo user's email at
                 the IdP can take over that account. Only keep this on when you
                 trust the IdP to enforce email ownership.
               </p>
@@ -179,7 +179,7 @@ export default function SettingsForm({
               Enable account-linking by email?
             </DialogTitle>
             <DialogDescription>
-              When enabled, a sign-in is merged into an existing Continuum
+              When enabled, a sign-in is merged into an existing Silo
               account whenever the IdP's email matches. If the IdP doesn't
               strictly verify email addresses, an attacker who controls the
               matching email at the IdP can take over that account.

@@ -3,7 +3,7 @@ package claims_test
 import (
 	"testing"
 
-	"github.com/RXWatcher/continuum-plugin-oidc-login/internal/claims"
+	"github.com/RXWatcher/silo-plugin-oidc-login/internal/claims"
 )
 
 func TestResolvePath_TopLevel(t *testing.T) {

@@ -10,12 +10,12 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/structpb"
 
-	pluginv1 "github.com/ContinuumApp/continuum-plugin-sdk/pkg/pluginproto/continuum/plugin/v1"
+	pluginv1 "github.com/ContinuumApp/continuum-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
 
-	"github.com/RXWatcher/continuum-plugin-oidc-login/internal/auth"
-	pluginoidc "github.com/RXWatcher/continuum-plugin-oidc-login/internal/oidc"
-	"github.com/RXWatcher/continuum-plugin-oidc-login/internal/oidctest"
-	pluginrt "github.com/RXWatcher/continuum-plugin-oidc-login/internal/runtime"
+	"github.com/RXWatcher/silo-plugin-oidc-login/internal/auth"
+	pluginoidc "github.com/RXWatcher/silo-plugin-oidc-login/internal/oidc"
+	"github.com/RXWatcher/silo-plugin-oidc-login/internal/oidctest"
+	pluginrt "github.com/RXWatcher/silo-plugin-oidc-login/internal/runtime"
 )
 
 func setupServer(t *testing.T, cfg pluginrt.Config, idp *oidctest.IdP) *auth.Server {
@@ -339,7 +339,7 @@ func TestExchangeCode_ClaimFilter_RejectsMissingGroup(t *testing.T) {
 	cfg := pluginrt.Config{
 		ClientID: "client-1", ClientSecret: "s",
 		ClaimFilters: []pluginrt.ClaimFilter{
-			{ClaimPath: "groups", Operator: "contains", Value: "continuum-users"},
+			{ClaimPath: "groups", Operator: "contains", Value: "silo-users"},
 		},
 	}
 	s := setupServer(t, cfg, idp)
@@ -366,13 +366,13 @@ func TestExchangeCode_ClaimFilter_AcceptsMatchingGroup(t *testing.T) {
 	cfg := pluginrt.Config{
 		ClientID: "client-1", ClientSecret: "s",
 		ClaimFilters: []pluginrt.ClaimFilter{
-			{ClaimPath: "groups", Operator: "contains", Value: "continuum-users"},
+			{ClaimPath: "groups", Operator: "contains", Value: "silo-users"},
 		},
 	}
 	s := setupServer(t, cfg, idp)
 
 	code, _ := idp.IssueCode(t,
-		map[string]any{"sub": "u", "nonce": "n", "groups": []any{"continuum-users"}, "email": "u@x.com", "email_verified": true},
+		map[string]any{"sub": "u", "nonce": "n", "groups": []any{"silo-users"}, "email": "u@x.com", "email_verified": true},
 		map[string]any{"sub": "u", "email": "u@x.com"},
 		"access-tok-12345678",
 	)
@@ -389,13 +389,13 @@ func TestExchangeCode_RoleMapping_AssignsAdminFromClaims(t *testing.T) {
 	cfg := pluginrt.Config{
 		ClientID: "client-1", ClientSecret: "s",
 		ClaimRoleMapping: []pluginrt.RoleMappingRule{
-			{ClaimPath: "groups", Operator: "contains", Value: "continuum-admins", Role: "admin"},
+			{ClaimPath: "groups", Operator: "contains", Value: "silo-admins", Role: "admin"},
 		},
 	}
 	s := setupServer(t, cfg, idp)
 
 	code, _ := idp.IssueCode(t,
-		map[string]any{"sub": "u-9", "nonce": "n", "groups": []any{"continuum-admins"}, "email": "u@x.com", "email_verified": true},
+		map[string]any{"sub": "u-9", "nonce": "n", "groups": []any{"silo-admins"}, "email": "u@x.com", "email_verified": true},
 		map[string]any{"sub": "u-9", "email": "u@x.com"},
 		"access-tok-12345678",
 	)
@@ -407,8 +407,8 @@ func TestExchangeCode_RoleMapping_AssignsAdminFromClaims(t *testing.T) {
 		t.Fatalf("ExchangeCode: %v", err)
 	}
 	claims := resp.GetClaims().AsMap()
-	if claims["continuum_role"] != "admin" {
-		t.Errorf("continuum_role = %v, want admin", claims["continuum_role"])
+	if claims["silo_role"] != "admin" {
+		t.Errorf("silo_role = %v, want admin", claims["silo_role"])
 	}
 }
 
@@ -429,8 +429,8 @@ func TestExchangeCode_LinkByEmail_SetsLinkClaim(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ExchangeCode: %v", err)
 	}
-	if v, ok := resp.GetClaims().AsMap()["continuum_link_by_email"].(bool); !ok || !v {
-		t.Errorf("continuum_link_by_email = %v (want true)", resp.GetClaims().AsMap()["continuum_link_by_email"])
+	if v, ok := resp.GetClaims().AsMap()["silo_link_by_email"].(bool); !ok || !v {
+		t.Errorf("silo_link_by_email = %v (want true)", resp.GetClaims().AsMap()["silo_link_by_email"])
 	}
 }
 
@@ -451,8 +451,8 @@ func TestExchangeCode_LinkByEmail_Disabled_OmitsLinkClaim(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ExchangeCode: %v", err)
 	}
-	if _, present := resp.GetClaims().AsMap()["continuum_link_by_email"]; present {
-		t.Errorf("continuum_link_by_email should be absent when LinkByEmail=false")
+	if _, present := resp.GetClaims().AsMap()["silo_link_by_email"]; present {
+		t.Errorf("silo_link_by_email should be absent when LinkByEmail=false")
 	}
 }
 
@@ -478,8 +478,8 @@ func TestExchangeCode_DefaultRoleIsUser_WhenNoMappingMatches(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ExchangeCode: %v", err)
 	}
-	if got := resp.GetClaims().AsMap()["continuum_role"]; got != "user" {
-		t.Errorf("continuum_role = %v, want user (default fallback)", got)
+	if got := resp.GetClaims().AsMap()["silo_role"]; got != "user" {
+		t.Errorf("silo_role = %v, want user (default fallback)", got)
 	}
 }
 
