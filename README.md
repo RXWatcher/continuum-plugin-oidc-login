@@ -29,9 +29,9 @@ Declared HTTP routes:
 
 - Standalone auth provider. Plugs into the Silo host's `auth_provider.v1` plane; the host owns session creation and applies role mappings against the claims this plugin returns.
 - A Postgres connection string (`database_url` in global config) is required. The plugin runs migrations on its dedicated `oidc_login` schema and uses it for persisted settings and claim/role rules.
-- Built against [`continuum-plugin-sdk`](https://github.com/ContinuumApp/continuum-plugin-sdk) (Runtime, HttpRoutes, AuthProvider servers) and serves via the SDK runtime loop.
+- Built against [`continuum-plugin-sdk`](https://github.com/Silo-Server/silo-plugin-sdk) (Runtime, HttpRoutes, AuthProvider servers) and serves via the SDK runtime loop.
 
-Host: [`ContinuumApp/silo`](https://github.com/ContinuumApp/silo).
+Host: [`Silo-Server/silo-server`](https://github.com/Silo-Server/silo-server).
 
 ## External services
 
