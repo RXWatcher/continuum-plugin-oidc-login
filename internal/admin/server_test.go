@@ -17,7 +17,7 @@ import (
 func newAdmin(t *testing.T, cfg pluginrt.Config, idp *oidctest.IdP) *admin.Server {
 	t.Helper()
 	prov, err := pluginoidc.NewProvider(context.Background(), pluginoidc.NewArgs{
-		IssuerURL: idp.URL, ClientID: cfg.ClientID, ClientSecret: cfg.ClientSecret,
+		IssuerURL: idp.URL, ClientID: cfg.ClientID, ClientSecret: cfg.ClientSecret, AllowLoopback: true,
 	})
 	if err != nil {
 		t.Fatalf("provider: %v", err)

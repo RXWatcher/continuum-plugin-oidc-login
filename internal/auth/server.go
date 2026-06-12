@@ -13,17 +13,27 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 
+	gooidc "github.com/coreos/go-oidc/v3/oidc"
+	"github.com/hashicorp/go-hclog"
 	"golang.org/x/oauth2"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/structpb"
 
-	pluginv1 "github.com/ContinuumApp/continuum-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
+	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
 
 	"github.com/RXWatcher/silo-plugin-oidc-login/internal/claims"
 	pluginoidc "github.com/RXWatcher/silo-plugin-oidc-login/internal/oidc"
 	pluginrt "github.com/RXWatcher/silo-plugin-oidc-login/internal/runtime"
 )
+
+// logDebug records upstream failure detail at debug level only. The caller-
+// facing gRPC status stays generic so token-exchange / verification text (and
+// any token context it may carry) never leaks to the client. The raw auth code
+// and tokens are never passed in here.
+func logDebug(msg string, err error) {
+	hclog.Default().Debug("oidc auth: "+msg, "error", err)
+}
 
 // Server implements pluginv1.AuthProviderServer. Configuration and the OIDC
 // provider live behind closures so main.go can swap them at Configure time
@@ -131,6 +141,12 @@ func (s *Server) ExchangeCode(ctx context.Context, req *pluginv1.ExchangeCodeReq
 		}
 	}
 
+	// Pin token exchange, id_token JWKS refresh, and the UserInfo fetch below
+	// to the provider's SSRF-hardened HTTP client.
+	if hc := prov.HTTPClient(); hc != nil {
+		ctx = gooidc.ClientContext(ctx, hc)
+	}
+
 	oc := prov.OAuth2Config()
 	oc.RedirectURL = req.GetRedirectUri()
 
@@ -138,7 +154,10 @@ func (s *Server) ExchangeCode(ctx context.Context, req *pluginv1.ExchangeCodeReq
 		oauth2.SetAuthURLParam("code_verifier", verifier),
 	)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "token exchange: %v", err)
+		// Upstream errors can echo token/endpoint detail; never surface that to
+		// the caller. Detail is logged at debug only (and never the raw code).
+		logDebug("token exchange failed", err)
+		return nil, status.Error(codes.Internal, "token exchange failed")
 	}
 
 	rawIDToken, _ := tok.Extra("id_token").(string)
@@ -147,7 +166,8 @@ func (s *Server) ExchangeCode(ctx context.Context, req *pluginv1.ExchangeCodeReq
 	}
 	idToken, err := prov.Verifier().Verify(ctx, rawIDToken)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "id_token verification: %v", err)
+		logDebug("id_token verification failed", err)
+		return nil, status.Error(codes.Internal, "id_token verification failed")
 	}
 	if idToken.Nonce != expectedNonce {
 		return nil, status.Error(codes.Unauthenticated, "nonce mismatch")
@@ -181,46 +201,41 @@ func (s *Server) ExchangeCode(ctx context.Context, req *pluginv1.ExchangeCodeReq
 		}
 	}
 
-	if cfg.EmailVerifiedRequired {
-		if v, ok := merged["email_verified"].(bool); !ok || !v {
-			return nil, status.Error(codes.PermissionDenied, "email not verified")
-		}
+	// Security-sensitive email + email_verified MUST come from the signed
+	// id_token, never the userinfo-merged map. Userinfo is unsigned and can
+	// override id_token claims on collision; trusting it for the email-verified
+	// gate or for email-based account linking would let an IdP (or an attacker
+	// who can influence userinfo) claim an arbitrary verified email and take
+	// over an existing account. sub is already pinned to the id_token above.
+	idEmailVerified, _ := claims.EmailVerified(idClaims)
+	idEmail, _ := idClaims["email"].(string)
+
+	if cfg.EmailVerifiedRequired && !idEmailVerified {
+		return nil, status.Error(codes.PermissionDenied, "email not verified")
 	}
 
 	if err := claims.EvaluateFilters(merged, cfg.ClaimFilters); err != nil {
 		return nil, status.Error(codes.PermissionDenied, "claim filter rejected")
 	}
 	merged["silo_role"] = claims.ResolveRole(merged, cfg.ClaimRoleMapping)
-	if cfg.LinkByEmail {
+	// Account-takeover guard: only advertise email linking when the id_token's
+	// email is verified AND non-empty, independent of the EmailVerifiedRequired
+	// toggle. Linking an unverified/empty email would let a fresh OIDC identity
+	// claim an existing local account by email.
+	if cfg.LinkByEmail && idEmailVerified && idEmail != "" {
 		merged["silo_link_by_email"] = true
 	}
 
-	sub, _ := merged["sub"].(string)
-	email, _ := merged["email"].(string)
-	name, _ := merged["name"].(string)
-	if name == "" {
-		first, _ := merged["given_name"].(string)
-		last, _ := merged["family_name"].(string)
-		switch {
-		case first != "" && last != "":
-			name = first + " " + last
-		case first != "":
-			name = first
-		case last != "":
-			name = last
-		default:
-			name = email
-		}
-	}
+	id := claims.DeriveIdentity(merged)
 
 	cs, err := structpb.NewStruct(merged)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "claims structpb: %v", err)
 	}
 	return &pluginv1.AuthenticateResponse{
-		ExternalSubject: sub,
-		DisplayName:     name,
-		Email:           email,
+		ExternalSubject: id.Subject,
+		DisplayName:     id.DisplayName,
+		Email:           id.Email,
 		Claims:          cs,
 	}, nil
 }

@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 
@@ -43,7 +44,7 @@ func DefaultConfig() pluginrt.Config {
 func (s *Store) GetConfig(ctx context.Context) (pluginrt.Config, error) {
 	var raw []byte
 	err := s.pool.QueryRow(ctx, `SELECT data FROM app_config WHERE id = 1`).Scan(&raw)
-	if err == pgx.ErrNoRows {
+	if errors.Is(err, pgx.ErrNoRows) {
 		if _, err := s.pool.Exec(ctx, `INSERT INTO app_config (id, data) VALUES (1, '{}'::jsonb) ON CONFLICT (id) DO NOTHING`); err != nil {
 			return pluginrt.Config{}, fmt.Errorf("ensure app_config: %w", err)
 		}

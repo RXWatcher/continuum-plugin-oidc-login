@@ -15,8 +15,8 @@ import (
 	"strings"
 	"sync"
 
-	pluginv1 "github.com/ContinuumApp/continuum-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
-	"github.com/ContinuumApp/continuum-plugin-sdk/pkg/pluginsdk/runtimedefault"
+	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
+	"github.com/Silo-Server/silo-plugin-sdk/pkg/pluginsdk/runtimedefault"
 )
 
 // AllowedIcons is the allowlist of bundled icon SVGs. The icon_url_path config
@@ -208,6 +208,12 @@ func ValidateConfig(cfg Config) error {
 	if !scopeIncludesOpenID(cfg.Scopes) {
 		return errors.New("scopes must include openid")
 	}
+	// Account-takeover guard: email-based linking is only safe when verified
+	// email is mandatory. Allowing link_by_email without email_verified_required
+	// would let an unverified OIDC email claim an existing local account.
+	if cfg.LinkByEmail && !cfg.EmailVerifiedRequired {
+		return errors.New("link_by_email requires email_verified_required to be enabled")
+	}
 	if !IconAllowed(cfg.IconURLPath) {
 		return fmt.Errorf("icon_url_path %q must be a bundled icon, absolute http(s) URL, or root-relative path", cfg.IconURLPath)
 	}
@@ -268,6 +274,41 @@ func validateIssuerURL(raw string) error {
 	}
 	if u.Scheme == "http" && !isLocalhost(u.Hostname()) {
 		return fmt.Errorf("issuer_url must use https except for localhost")
+	}
+	return nil
+}
+
+// IssuerAllowsLoopback reports whether issuerURL is an explicitly-configured
+// localhost issuer, in which case server-side discovery/JWKS fetches may reach
+// loopback addresses. Any parse failure or non-localhost host returns false so
+// the SSRF-hardened client stays fully closed by default.
+func IssuerAllowsLoopback(issuerURL string) bool {
+	u, err := url.Parse(issuerURL)
+	if err != nil || u.Host == "" {
+		return false
+	}
+	return isLocalhost(u.Hostname())
+}
+
+// ValidateFetchURL validates a server-side-fetchable URL (e.g. the jwks_uri
+// returned by discovery) the same way validateIssuerURL guards issuer_url:
+// http(s) scheme, a host, no embedded credentials, and https required except
+// for localhost. Unlike issuer_url it tolerates a path and query, since a
+// jwks_uri legitimately carries both. This is a structural guard; the
+// SSRF-hardened dialer enforces the IP-range policy at connect time.
+func ValidateFetchURL(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("url is not valid: %w", err)
+	}
+	if u.Scheme != "https" && u.Scheme != "http" {
+		return fmt.Errorf("url scheme must be http or https")
+	}
+	if u.Host == "" || u.User != nil {
+		return fmt.Errorf("url must have a host and no embedded credentials")
+	}
+	if u.Scheme == "http" && !isLocalhost(u.Hostname()) {
+		return fmt.Errorf("url must use https except for localhost")
 	}
 	return nil
 }

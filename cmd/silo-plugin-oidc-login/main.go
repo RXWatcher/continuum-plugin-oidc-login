@@ -13,13 +13,14 @@ import (
 	"os"
 	goruntime "runtime"
 	"sync/atomic"
+	"time"
 
 	"github.com/hashicorp/go-hclog"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	pluginv1 "github.com/ContinuumApp/continuum-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
-	publicmanifest "github.com/ContinuumApp/continuum-plugin-sdk/pkg/pluginsdk/manifest"
-	sdkruntime "github.com/ContinuumApp/continuum-plugin-sdk/pkg/pluginsdk/runtime"
+	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
+	publicmanifest "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginsdk/manifest"
+	sdkruntime "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginsdk/runtime"
 
 	"github.com/RXWatcher/silo-plugin-oidc-login/cmd/silo-plugin-oidc-login/assets"
 	pluginadmin "github.com/RXWatcher/silo-plugin-oidc-login/internal/admin"
@@ -68,12 +69,18 @@ func main() {
 	applyConfig := func(cfg pluginrt.Config) error {
 		var prov *pluginoidc.Provider
 		if cfg.ProviderConfigured() {
+			// Bound OIDC discovery so a slow/unreachable issuer can't wedge
+			// Configure indefinitely (it runs synchronously off the host's
+			// Configure RPC).
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
 			var err error
-			prov, err = pluginoidc.NewProvider(context.Background(), pluginoidc.NewArgs{
-				IssuerURL:    cfg.IssuerURL,
-				ClientID:     cfg.ClientID,
-				ClientSecret: cfg.ClientSecret,
-				Scopes:       cfg.Scopes,
+			prov, err = pluginoidc.NewProvider(ctx, pluginoidc.NewArgs{
+				IssuerURL:     cfg.IssuerURL,
+				ClientID:      cfg.ClientID,
+				ClientSecret:  cfg.ClientSecret,
+				Scopes:        cfg.Scopes,
+				AllowLoopback: pluginrt.IssuerAllowsLoopback(cfg.IssuerURL),
 			})
 			if err != nil {
 				return fmt.Errorf("oidc provider: %w", err)

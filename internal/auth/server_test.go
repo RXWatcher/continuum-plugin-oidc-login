@@ -10,7 +10,7 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/structpb"
 
-	pluginv1 "github.com/ContinuumApp/continuum-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
+	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
 
 	"github.com/RXWatcher/silo-plugin-oidc-login/internal/auth"
 	pluginoidc "github.com/RXWatcher/silo-plugin-oidc-login/internal/oidc"
@@ -21,10 +21,11 @@ import (
 func setupServer(t *testing.T, cfg pluginrt.Config, idp *oidctest.IdP) *auth.Server {
 	t.Helper()
 	prov, err := pluginoidc.NewProvider(context.Background(), pluginoidc.NewArgs{
-		IssuerURL:    idp.URL,
-		ClientID:     cfg.ClientID,
-		ClientSecret: cfg.ClientSecret,
-		Scopes:       cfg.Scopes,
+		IssuerURL:     idp.URL,
+		ClientID:      cfg.ClientID,
+		ClientSecret:  cfg.ClientSecret,
+		Scopes:        cfg.Scopes,
+		AllowLoopback: true,
 	})
 	if err != nil {
 		t.Fatalf("NewProvider: %v", err)
@@ -293,6 +294,54 @@ func TestExchangeCode_EmailVerifiedRequired_RejectsUnverified(t *testing.T) {
 	}
 	if status.Code(err) != codes.PermissionDenied {
 		t.Errorf("code = %v", status.Code(err))
+	}
+}
+
+// TestExchangeCode_UserInfoCannotForgeEmailVerified proves userinfo (unsigned)
+// cannot override the signed id_token's email_verified=false to bypass the
+// EmailVerifiedRequired gate.
+func TestExchangeCode_UserInfoCannotForgeEmailVerified(t *testing.T) {
+	idp := oidctest.NewIdP(t, "client-1")
+	cfg := pluginrt.Config{ClientID: "client-1", ClientSecret: "s", EmailVerifiedRequired: true}
+	s := setupServer(t, cfg, idp)
+
+	code, _ := idp.IssueCode(t,
+		map[string]any{"sub": "u", "nonce": "n", "email": "u@x.com", "email_verified": false},
+		map[string]any{"sub": "u", "email": "u@x.com", "email_verified": true}, // userinfo lies
+		"access-tok-12345678",
+	)
+	pState, _ := structpb.NewStruct(map[string]any{"pkce_verifier": "v", "nonce": "n"})
+	_, err := s.ExchangeCode(context.Background(), &pluginv1.ExchangeCodeRequest{
+		Code: code, State: "s", RedirectUri: "/cb", ProviderState: pState,
+	})
+	if status.Code(err) != codes.PermissionDenied {
+		t.Errorf("code = %v, want PermissionDenied (userinfo must not forge email_verified)", status.Code(err))
+	}
+}
+
+// TestExchangeCode_LinkByEmail_RequiresVerifiedIDTokenEmail proves link_by_email
+// is NOT advertised when the id_token's email is unverified, even though
+// userinfo claims verification. EmailVerifiedRequired is off here so the login
+// itself succeeds; only the link claim must be withheld.
+func TestExchangeCode_LinkByEmail_RequiresVerifiedIDTokenEmail(t *testing.T) {
+	idp := oidctest.NewIdP(t, "client-1")
+	cfg := pluginrt.Config{ClientID: "client-1", ClientSecret: "s", LinkByEmail: true, EmailVerifiedRequired: false}
+	s := setupServer(t, cfg, idp)
+
+	code, _ := idp.IssueCode(t,
+		map[string]any{"sub": "u", "nonce": "n", "email": "u@x.com", "email_verified": false},
+		map[string]any{"sub": "u", "email": "u@x.com", "email_verified": true}, // userinfo lies
+		"access-tok-12345678",
+	)
+	pState, _ := structpb.NewStruct(map[string]any{"pkce_verifier": "v", "nonce": "n"})
+	resp, err := s.ExchangeCode(context.Background(), &pluginv1.ExchangeCodeRequest{
+		Code: code, State: "s", RedirectUri: "/cb", ProviderState: pState,
+	})
+	if err != nil {
+		t.Fatalf("ExchangeCode: %v", err)
+	}
+	if _, present := resp.GetClaims().AsMap()["silo_link_by_email"]; present {
+		t.Errorf("silo_link_by_email must be absent when id_token email is unverified")
 	}
 }
 

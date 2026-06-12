@@ -43,11 +43,12 @@ func fakeIdP(t *testing.T) (*httptest.Server, string) {
 func TestNewProvider_DiscoversEndpoints(t *testing.T) {
 	_, issuer := fakeIdP(t)
 	p, err := pluginoidc.NewProvider(context.Background(), pluginoidc.NewArgs{
-		IssuerURL:    issuer,
-		ClientID:     "c1",
-		ClientSecret: "s1",
-		Scopes:       "openid profile email",
-		RedirectURL:  "https://app/cb",
+		IssuerURL:     issuer,
+		ClientID:      "c1",
+		ClientSecret:  "s1",
+		Scopes:        "openid profile email",
+		RedirectURL:   "https://app/cb",
+		AllowLoopback: true,
 	})
 	if err != nil {
 		t.Fatalf("NewProvider: %v", err)
@@ -77,9 +78,10 @@ func TestNewProvider_DiscoversEndpoints(t *testing.T) {
 func TestNewProvider_DefaultScopesFallback(t *testing.T) {
 	_, issuer := fakeIdP(t)
 	p, err := pluginoidc.NewProvider(context.Background(), pluginoidc.NewArgs{
-		IssuerURL:    issuer,
-		ClientID:     "c",
-		ClientSecret: "s",
+		IssuerURL:     issuer,
+		ClientID:      "c",
+		ClientSecret:  "s",
+		AllowLoopback: true,
 	})
 	if err != nil {
 		t.Fatalf("NewProvider: %v", err)

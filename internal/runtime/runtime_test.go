@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	pluginv1 "github.com/ContinuumApp/continuum-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
+	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
 	"google.golang.org/protobuf/types/known/structpb"
 
 	pluginrt "github.com/RXWatcher/silo-plugin-oidc-login/internal/runtime"
@@ -107,6 +107,78 @@ func TestLoadConfig_RequiresOpenIDScope(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected error for scopes missing openid")
+	}
+}
+
+func TestLoadConfig_RejectsLinkByEmailWithoutVerification(t *testing.T) {
+	_, err := pluginrt.LoadConfig([]*pluginv1.ConfigEntry{
+		entry("issuer_url", "https://idp"),
+		entry("client_id", "c"),
+		entry("client_secret", "s"),
+		entry("scopes", "openid profile email"),
+		entry("link_by_email", true),
+		entry("email_verified_required", false),
+	})
+	if err == nil {
+		t.Fatal("expected error: link_by_email without email_verified_required")
+	}
+	if !strings.Contains(err.Error(), "link_by_email") {
+		t.Errorf("error = %v, want mention of link_by_email", err)
+	}
+}
+
+func TestLoadConfig_AllowsLinkByEmailWithVerification(t *testing.T) {
+	cfg, err := pluginrt.LoadConfig([]*pluginv1.ConfigEntry{
+		entry("issuer_url", "https://idp"),
+		entry("client_id", "c"),
+		entry("client_secret", "s"),
+		entry("scopes", "openid profile email"),
+		entry("link_by_email", true),
+		entry("email_verified_required", true),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !cfg.LinkByEmail || !cfg.EmailVerifiedRequired {
+		t.Errorf("cfg = %+v", cfg)
+	}
+}
+
+func TestValidateFetchURL(t *testing.T) {
+	ok := []string{
+		"https://idp.example.com/jwks.json",
+		"https://idp.example.com/jwks?v=1",
+		"http://localhost:8080/jwks.json",
+	}
+	for _, u := range ok {
+		if err := pluginrt.ValidateFetchURL(u); err != nil {
+			t.Errorf("ValidateFetchURL(%q) = %v, want nil", u, err)
+		}
+	}
+	bad := []string{
+		"ftp://idp.example.com/jwks",
+		"http://idp.example.com/jwks", // http on non-localhost
+		"https://user:pass@idp.example.com/jwks",
+		"https:///jwks", // no host
+	}
+	for _, u := range bad {
+		if err := pluginrt.ValidateFetchURL(u); err == nil {
+			t.Errorf("ValidateFetchURL(%q) = nil, want error", u)
+		}
+	}
+}
+
+func TestIssuerAllowsLoopback(t *testing.T) {
+	cases := map[string]bool{
+		"http://localhost:8080":   true,
+		"http://127.0.0.1:9000":   true,
+		"https://idp.example.com": false,
+		"https://10.0.0.5":        false,
+	}
+	for u, want := range cases {
+		if got := pluginrt.IssuerAllowsLoopback(u); got != want {
+			t.Errorf("IssuerAllowsLoopback(%q) = %v, want %v", u, got, want)
+		}
 	}
 }
 

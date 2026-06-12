@@ -177,9 +177,14 @@ func (s *Server) handleDiscovery(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 
+	// SSRF-hardened client: rejects loopback/private/link-local/metadata IPs at
+	// dial time (after DNS resolution). Loopback is permitted only when the
+	// operator explicitly configured a localhost issuer.
+	httpClient := pluginoidc.SecureHTTPClient(pluginrt.IssuerAllowsLoopback(cfg.IssuerURL))
+
 	url := strings.TrimRight(cfg.IssuerURL, "/") + "/.well-known/openid-configuration"
 	req, _ := http.NewRequestWithContext(ctx, "GET", url, nil)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": err.Error()})
 		return
@@ -205,7 +210,12 @@ func (s *Server) handleDiscovery(w http.ResponseWriter, r *http.Request) {
 	doc["ok"] = true
 
 	if jwksURI, _ := doc["jwks_uri"].(string); jwksURI != "" {
-		if keys := fetchJWKSSummary(ctx, jwksURI); keys != nil {
+		// The discovery doc is attacker-influenceable; re-validate its jwks_uri
+		// (scheme/host/credentials/https) before fetching, then route the fetch
+		// through the same SSRF-hardened client.
+		if err := pluginrt.ValidateFetchURL(jwksURI); err != nil {
+			doc["jwks_error"] = "rejected jwks_uri: " + err.Error()
+		} else if keys := fetchJWKSSummary(ctx, httpClient, jwksURI); keys != nil {
 			doc["jwks_keys"] = keys
 		}
 	}
@@ -215,9 +225,9 @@ func (s *Server) handleDiscovery(w http.ResponseWriter, r *http.Request) {
 // fetchJWKSSummary returns a stripped-down summary of the JWKS at jwksURI
 // (kid/kty/alg/use only). Returns nil on any failure — the discovery handler
 // degrades gracefully.
-func fetchJWKSSummary(ctx context.Context, jwksURI string) []map[string]any {
+func fetchJWKSSummary(ctx context.Context, httpClient *http.Client, jwksURI string) []map[string]any {
 	req, _ := http.NewRequestWithContext(ctx, "GET", jwksURI, nil)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil
 	}
@@ -315,53 +325,33 @@ func (s *Server) handleSimulateClaims(w http.ResponseWriter, r *http.Request) {
 
 	filterTrace, filtersPassed := claims.TraceFilters(req.Claims, filters)
 
-	emailVerifiedValue, emailVerifiedFound := req.Claims["email_verified"]
-	emailPassed := true
-	if emailRequired {
-		if b, ok := emailVerifiedValue.(bool); ok && b {
-			emailPassed = true
-		} else {
-			emailPassed = false
-		}
-	}
+	// Mirror ExchangeCode's email_verified evaluation via the shared helper so
+	// the simulator can't drift from the real gate.
+	emailVerified, emailVerifiedFound := claims.EmailVerified(req.Claims)
+	emailVerifiedValue := req.Claims["email_verified"]
+	emailPassed := !emailRequired || emailVerified
 
 	role, ruleIdx := claims.TraceRole(req.Claims, mapping)
 
-	sub, _ := req.Claims["sub"].(string)
-	email, _ := req.Claims["email"].(string)
-	name, _ := req.Claims["name"].(string)
-	if name == "" {
-		first, _ := req.Claims["given_name"].(string)
-		last, _ := req.Claims["family_name"].(string)
-		switch {
-		case first != "" && last != "":
-			name = first + " " + last
-		case first != "":
-			name = first
-		case last != "":
-			name = last
-		default:
-			name = email
-		}
-	}
+	id := claims.DeriveIdentity(req.Claims)
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"allowed":        filtersPassed && emailPassed && sub != "",
+		"allowed":        filtersPassed && emailPassed && id.Subject != "",
 		"filters_passed": filtersPassed,
 		"filter_trace":   filterTrace,
 		"email_verified_check": map[string]any{
-			"required":     emailRequired,
-			"claim_found":  emailVerifiedFound,
-			"claim_value":  emailVerifiedValue,
-			"passed":       emailPassed,
+			"required":    emailRequired,
+			"claim_found": emailVerifiedFound,
+			"claim_value": emailVerifiedValue,
+			"passed":      emailPassed,
 		},
-		"sub_present":     sub != "",
+		"sub_present":     id.Subject != "",
 		"role":            role,
 		"role_rule_index": ruleIdx,
 		"identity": map[string]any{
-			"sub":   sub,
-			"email": email,
-			"name":  name,
+			"sub":   id.Subject,
+			"email": id.Email,
+			"name":  id.DisplayName,
 		},
 	})
 }
