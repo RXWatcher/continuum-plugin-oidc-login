@@ -1,6 +1,7 @@
 package admin_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -8,9 +9,13 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hashicorp/go-hclog"
+
 	"github.com/RXWatcher/silo-plugin-oidc-login/internal/admin"
+	"github.com/RXWatcher/silo-plugin-oidc-login/internal/audit"
 	pluginoidc "github.com/RXWatcher/silo-plugin-oidc-login/internal/oidc"
 	"github.com/RXWatcher/silo-plugin-oidc-login/internal/oidctest"
+	"github.com/RXWatcher/silo-plugin-oidc-login/internal/ratelimit"
 	pluginrt "github.com/RXWatcher/silo-plugin-oidc-login/internal/runtime"
 )
 
@@ -373,5 +378,133 @@ func TestDecodeIDToken_BadTokenReportsError(t *testing.T) {
 	}
 	if resp["error"] == nil || resp["error"] == "" {
 		t.Errorf("expected error reason")
+	}
+}
+
+// TestDiagnostics_RateLimited_Returns429 proves the diagnostic endpoints sit
+// behind the limiter and emit 429 + Retry-After once the bucket is empty.
+func TestDiagnostics_RateLimited_Returns429(t *testing.T) {
+	idp := oidctest.NewIdP(t, "client-1")
+	cfg := pluginrt.Config{IssuerURL: idp.URL, ClientID: "client-1", ClientSecret: "s"}
+	prov, err := pluginoidc.NewProvider(context.Background(), pluginoidc.NewArgs{
+		IssuerURL: idp.URL, ClientID: cfg.ClientID, ClientSecret: cfg.ClientSecret, AllowLoopback: true,
+	})
+	if err != nil {
+		t.Fatalf("provider: %v", err)
+	}
+	s := admin.NewServer(admin.Deps{
+		ConfigFn:   func() pluginrt.Config { return cfg },
+		ProviderFn: func() *pluginoidc.Provider { return prov },
+		Limiter:    ratelimit.New(0.001, 1), // burst 1
+	})
+
+	call := func() *httptest.ResponseRecorder {
+		body, _ := json.Marshal(map[string]string{"id_token": "x.y.z"})
+		r := httptest.NewRequest("POST", "/api/v1/admin/decode-id-token", strings.NewReader(string(body)))
+		r.Header.Set("X-Silo-User-Role", "admin")
+		r.RemoteAddr = "9.9.9.9:5555"
+		w := httptest.NewRecorder()
+		s.Handler().ServeHTTP(w, r)
+		return w
+	}
+
+	if w := call(); w.Code == http.StatusTooManyRequests {
+		t.Fatal("first call should not be rate limited")
+	}
+	w := call()
+	if w.Code != http.StatusTooManyRequests {
+		t.Fatalf("second call code = %d, want 429", w.Code)
+	}
+	if w.Header().Get("Retry-After") == "" {
+		t.Error("missing Retry-After header on 429")
+	}
+}
+
+// TestDiagnostics_RateLimit_PerIP proves buckets are keyed per source IP, so a
+// second client isn't throttled by the first client's usage.
+func TestDiagnostics_RateLimit_PerIP(t *testing.T) {
+	idp := oidctest.NewIdP(t, "client-1")
+	cfg := pluginrt.Config{IssuerURL: idp.URL, ClientID: "client-1", ClientSecret: "s"}
+	prov, _ := pluginoidc.NewProvider(context.Background(), pluginoidc.NewArgs{
+		IssuerURL: idp.URL, ClientID: cfg.ClientID, ClientSecret: cfg.ClientSecret, AllowLoopback: true,
+	})
+	s := admin.NewServer(admin.Deps{
+		ConfigFn:   func() pluginrt.Config { return cfg },
+		ProviderFn: func() *pluginoidc.Provider { return prov },
+		Limiter:    ratelimit.New(0.001, 1),
+	})
+
+	call := func(xff string) int {
+		body, _ := json.Marshal(map[string]string{"id_token": "x.y.z"})
+		r := httptest.NewRequest("POST", "/api/v1/admin/decode-id-token", strings.NewReader(string(body)))
+		r.Header.Set("X-Silo-User-Role", "admin")
+		r.Header.Set("X-Forwarded-For", xff)
+		w := httptest.NewRecorder()
+		s.Handler().ServeHTTP(w, r)
+		return w.Code
+	}
+
+	_ = call("1.1.1.1")
+	if code := call("1.1.1.1"); code != http.StatusTooManyRequests {
+		t.Fatalf("repeat from same IP code = %d, want 429", code)
+	}
+	if code := call("2.2.2.2"); code == http.StatusTooManyRequests {
+		t.Error("different IP should have its own bucket")
+	}
+}
+
+// TestUpdateConfig_AuditsMutation proves a successful config PATCH emits a
+// structured audit record with the actor, issuer before/after, and a
+// secret-changed bool — and never the secret value itself.
+func TestUpdateConfig_AuditsMutation(t *testing.T) {
+	var buf bytes.Buffer
+	base := hclog.New(&hclog.LoggerOptions{Output: &buf, JSONFormat: true, Level: hclog.Debug})
+
+	cfg := pluginrt.Config{
+		IssuerURL: "https://old.example", ClientID: "cid", ClientSecret: "old-secret",
+		Scopes: "openid", EmailVerifiedRequired: true,
+	}
+	s := admin.NewServer(admin.Deps{
+		ConfigFn:       func() pluginrt.Config { return cfg },
+		ProviderFn:     func() *pluginoidc.Provider { return nil },
+		UpdateConfigFn: func(context.Context, pluginrt.Config) error { return nil },
+		AuditLog:       audit.New(base),
+	})
+
+	newIssuer := "https://new.example"
+	newSecret := "brand-new-secret"
+	body, _ := json.Marshal(map[string]any{"issuer_url": newIssuer, "client_secret": newSecret})
+	r := httptest.NewRequest("PATCH", "/api/v1/admin/config", bytes.NewReader(body))
+	r.Header.Set("X-Silo-User-Role", "admin")
+	r.Header.Set("X-Silo-User-Id", "admin-42")
+	r.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("code = %d body = %s", w.Code, w.Body.String())
+	}
+
+	logged := buf.String()
+	if strings.Contains(logged, newSecret) || strings.Contains(logged, "old-secret") {
+		t.Fatal("audit log must never contain the client_secret value")
+	}
+	var rec map[string]any
+	for _, line := range strings.Split(strings.TrimSpace(logged), "\n") {
+		var m map[string]any
+		if json.Unmarshal([]byte(line), &m) == nil && m["event"] == "config_mutation" {
+			rec = m
+		}
+	}
+	if rec == nil {
+		t.Fatalf("no config_mutation record in:\n%s", logged)
+	}
+	if rec["actor"] != "admin-42" {
+		t.Errorf("actor = %v", rec["actor"])
+	}
+	if rec["issuer_url_before"] != "https://old.example" || rec["issuer_url_after"] != newIssuer {
+		t.Errorf("issuer before/after = %v / %v", rec["issuer_url_before"], rec["issuer_url_after"])
+	}
+	if rec["secret_changed"] != true {
+		t.Errorf("secret_changed = %v, want true", rec["secret_changed"])
 	}
 }

@@ -9,14 +9,18 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/RXWatcher/silo-plugin-oidc-login/internal/audit"
 	"github.com/RXWatcher/silo-plugin-oidc-login/internal/claims"
 	pluginoidc "github.com/RXWatcher/silo-plugin-oidc-login/internal/oidc"
+	"github.com/RXWatcher/silo-plugin-oidc-login/internal/ratelimit"
 	pluginrt "github.com/RXWatcher/silo-plugin-oidc-login/internal/runtime"
 )
 
@@ -33,6 +37,12 @@ type Deps struct {
 	ConfigFn       func() pluginrt.Config
 	ProviderFn     func() *pluginoidc.Provider
 	UpdateConfigFn func(context.Context, pluginrt.Config) error
+	// Limiter rate-limits the diagnostic endpoints (decode-id-token, discovery,
+	// simulate-claims), which run verification / outbound fetches on
+	// attacker-influenced input. Nil disables admin rate limiting.
+	Limiter *ratelimit.Limiter
+	// AuditLog records admin config mutations. Nil falls back to a default.
+	AuditLog *audit.Logger
 }
 
 // Server exposes a chi handler. It owns no state of its own beyond Deps.
@@ -41,7 +51,12 @@ type Server struct {
 }
 
 // NewServer constructs an admin server.
-func NewServer(d Deps) *Server { return &Server{deps: d} }
+func NewServer(d Deps) *Server {
+	if d.AuditLog == nil {
+		d.AuditLog = audit.New(nil)
+	}
+	return &Server{deps: d}
+}
 
 // Handler returns the chi router. /whoami is open to any authenticated user;
 // all other endpoints sit behind requireAdmin.
@@ -52,11 +67,59 @@ func (s *Server) Handler() http.Handler {
 		r.Use(s.requireAdmin)
 		r.Get("/api/v1/admin/config-summary", s.handleConfigSummary)
 		r.Patch("/api/v1/admin/config", s.handleUpdateConfig)
-		r.Get("/api/v1/admin/discovery", s.handleDiscovery)
-		r.Post("/api/v1/admin/decode-id-token", s.handleDecodeIDToken)
-		r.Post("/api/v1/admin/simulate-claims", s.handleSimulateClaims)
+
+		// Diagnostic endpoints additionally sit behind the rate limiter: each
+		// runs verification or an outbound network call on attacker-influenced
+		// input, so an admin token (or a confused-deputy host) shouldn't be able
+		// to drive unbounded JWKS verifications / outbound discovery fetches.
+		r.Group(func(r chi.Router) {
+			r.Use(s.rateLimit)
+			r.Get("/api/v1/admin/discovery", s.handleDiscovery)
+			r.Post("/api/v1/admin/decode-id-token", s.handleDecodeIDToken)
+			r.Post("/api/v1/admin/simulate-claims", s.handleSimulateClaims)
+		})
 	})
 	return r
+}
+
+// rateLimit throttles the diagnostic endpoints per source IP, returning 429
+// with a Retry-After header when the bucket is empty. A nil limiter is a no-op.
+func (s *Server) rateLimit(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.deps.Limiter != nil {
+			if ok, retry := s.deps.Limiter.Allow("admin:" + remoteIP(r)); !ok {
+				secs := int(retry.Seconds())
+				if secs < 1 {
+					secs = 1
+				}
+				w.Header().Set("Retry-After", strconv.Itoa(secs))
+				writeJSON(w, http.StatusTooManyRequests, map[string]any{"error": "rate limit exceeded"})
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// remoteIP returns the request's source IP, preferring the host's
+// X-Forwarded-For / X-Real-IP headers (the plugin runs behind the silo host
+// proxy) and falling back to RemoteAddr. An empty result collapses to a shared
+// bucket via the limiter key.
+func remoteIP(r *http.Request) string {
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		if i := strings.IndexByte(xff, ','); i >= 0 {
+			return strings.TrimSpace(xff[:i])
+		}
+		return strings.TrimSpace(xff)
+	}
+	if xr := r.Header.Get("X-Real-IP"); xr != "" {
+		return strings.TrimSpace(xr)
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
 }
 
 func (s *Server) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
@@ -65,6 +128,7 @@ func (s *Server) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cur := s.deps.ConfigFn()
+	oldIssuer := cur.IssuerURL
 	var req struct {
 		IssuerURL             *string                     `json:"issuer_url"`
 		ClientID              *string                     `json:"client_id"`
@@ -87,7 +151,9 @@ func (s *Server) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 	if req.ClientID != nil {
 		cur.ClientID = strings.TrimSpace(*req.ClientID)
 	}
+	secretChanged := false
 	if req.ClientSecret != nil && *req.ClientSecret != "" {
+		secretChanged = *req.ClientSecret != cur.ClientSecret
 		cur.ClientSecret = *req.ClientSecret
 	}
 	if req.Scopes != nil {
@@ -116,6 +182,10 @@ func (s *Server) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
 		return
 	}
+	// Audit the mutation only after it persisted. Actor is the host-stamped
+	// user id; issuer before/after and the secret-changed bool let operators
+	// reconstruct who changed what without logging the secret itself.
+	s.deps.AuditLog.ConfigMutation(r.Header.Get("X-Silo-User-Id"), oldIssuer, cur.IssuerURL, secretChanged)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 

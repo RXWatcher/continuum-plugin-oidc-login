@@ -24,9 +24,11 @@ import (
 
 	"github.com/RXWatcher/silo-plugin-oidc-login/cmd/silo-plugin-oidc-login/assets"
 	pluginadmin "github.com/RXWatcher/silo-plugin-oidc-login/internal/admin"
+	"github.com/RXWatcher/silo-plugin-oidc-login/internal/audit"
 	pluginauth "github.com/RXWatcher/silo-plugin-oidc-login/internal/auth"
 	"github.com/RXWatcher/silo-plugin-oidc-login/internal/httproutes"
 	pluginoidc "github.com/RXWatcher/silo-plugin-oidc-login/internal/oidc"
+	"github.com/RXWatcher/silo-plugin-oidc-login/internal/ratelimit"
 	pluginrt "github.com/RXWatcher/silo-plugin-oidc-login/internal/runtime"
 	"github.com/RXWatcher/silo-plugin-oidc-login/internal/server"
 	"github.com/RXWatcher/silo-plugin-oidc-login/internal/store"
@@ -56,6 +58,25 @@ func main() {
 		storePtr atomic.Pointer[store.Store]
 	)
 
+	auditLog := audit.New(logger)
+
+	// Process-wide limiters. ExchangeCode gets a tighter bucket than the admin
+	// diagnostics since it sits on the unauthenticated login path. Both are
+	// keyed per source IP inside the respective servers.
+	exchangeLimiter := ratelimit.New(5.0/60.0, 10) // ~5/min sustained, burst 10
+	adminLimiter := ratelimit.New(1.0, 20)         // 1/sec sustained, burst 20
+
+	// consumeNonce backs ExchangeCode's one-time replay guard. It resolves the
+	// live store per call; until the store is wired (pre-Configure) it is a
+	// no-op so InitAuthorize/ExchangeCode still function in degraded mode.
+	consumeNonce := func(ctx context.Context, nonce string, expiresAt time.Time) error {
+		st := storePtr.Load()
+		if st == nil {
+			return nil
+		}
+		return st.ConsumeNonce(ctx, nonce, expiresAt)
+	}
+
 	authSrv := pluginauth.NewServer(
 		func() pluginrt.Config {
 			if p := cfgPtr.Load(); p != nil {
@@ -64,6 +85,9 @@ func main() {
 			return pluginrt.Config{}
 		},
 		func() *pluginoidc.Provider { return provPtr.Load() },
+		exchangeLimiter,
+		auditLog,
+		consumeNonce,
 	)
 
 	applyConfig := func(cfg pluginrt.Config) error {
@@ -142,6 +166,8 @@ func main() {
 				}
 				return applyConfig(next)
 			},
+			Limiter:  adminLimiter,
+			AuditLog: auditLog,
 		})
 
 		srv := server.New(server.Deps{

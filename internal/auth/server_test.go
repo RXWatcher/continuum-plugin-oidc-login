@@ -4,8 +4,11 @@ import (
 	"context"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
+	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -15,8 +18,51 @@ import (
 	"github.com/RXWatcher/silo-plugin-oidc-login/internal/auth"
 	pluginoidc "github.com/RXWatcher/silo-plugin-oidc-login/internal/oidc"
 	"github.com/RXWatcher/silo-plugin-oidc-login/internal/oidctest"
+	"github.com/RXWatcher/silo-plugin-oidc-login/internal/ratelimit"
 	pluginrt "github.com/RXWatcher/silo-plugin-oidc-login/internal/runtime"
+	"github.com/RXWatcher/silo-plugin-oidc-login/internal/store"
 )
+
+// memNonce is an in-memory ConsumeNonceFn mirroring the store's one-time
+// semantics: the first use of a nonce succeeds, every replay returns
+// store.ErrReplay.
+type memNonce struct {
+	mu   sync.Mutex
+	seen map[string]bool
+}
+
+func newMemNonce() *memNonce { return &memNonce{seen: map[string]bool{}} }
+
+func (m *memNonce) consume(_ context.Context, nonce string, _ time.Time) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.seen[nonce] {
+		return store.ErrReplay
+	}
+	m.seen[nonce] = true
+	return nil
+}
+
+// setupServerWith builds an auth.Server wired with the supplied limiter and
+// nonce consumer so the new replay/rate-limit gates can be exercised.
+func setupServerWith(t *testing.T, cfg pluginrt.Config, idp *oidctest.IdP, lim *ratelimit.Limiter, consume auth.ConsumeNonceFn) *auth.Server {
+	t.Helper()
+	prov, err := pluginoidc.NewProvider(context.Background(), pluginoidc.NewArgs{
+		IssuerURL:     idp.URL,
+		ClientID:      cfg.ClientID,
+		ClientSecret:  cfg.ClientSecret,
+		Scopes:        cfg.Scopes,
+		AllowLoopback: true,
+	})
+	if err != nil {
+		t.Fatalf("NewProvider: %v", err)
+	}
+	return auth.NewServer(
+		func() pluginrt.Config { return cfg },
+		func() *pluginoidc.Provider { return prov },
+		lim, nil, consume,
+	)
+}
 
 func setupServer(t *testing.T, cfg pluginrt.Config, idp *oidctest.IdP) *auth.Server {
 	t.Helper()
@@ -33,6 +79,7 @@ func setupServer(t *testing.T, cfg pluginrt.Config, idp *oidctest.IdP) *auth.Ser
 	return auth.NewServer(
 		func() pluginrt.Config { return cfg },
 		func() *pluginoidc.Provider { return prov },
+		nil, nil, nil,
 	)
 }
 
@@ -104,6 +151,7 @@ func TestInitAuthorize_NoProvider_FailedPrecondition(t *testing.T) {
 	s := auth.NewServer(
 		func() pluginrt.Config { return pluginrt.Config{} },
 		func() *pluginoidc.Provider { return nil },
+		nil, nil, nil,
 	)
 	_, err := s.InitAuthorize(context.Background(), &pluginv1.InitAuthorizeRequest{})
 	if status.Code(err) != codes.FailedPrecondition {
@@ -542,5 +590,205 @@ func TestExchangeCode_MissingProviderState_Rejects(t *testing.T) {
 	})
 	if status.Code(err) != codes.InvalidArgument {
 		t.Errorf("err = %v", err)
+	}
+}
+
+// TestInitAuthorize_StashesRedirectAndIssuedAt verifies the new provider_state
+// fields backing redirect-uri allowlisting and stale-state rejection are set.
+func TestInitAuthorize_StashesRedirectAndIssuedAt(t *testing.T) {
+	idp := oidctest.NewIdP(t, "client-1")
+	cfg := pluginrt.Config{ClientID: "client-1", ClientSecret: "s", Scopes: "openid profile email"}
+	s := setupServer(t, cfg, idp)
+
+	resp, err := s.InitAuthorize(context.Background(), &pluginv1.InitAuthorizeRequest{
+		RedirectUri: "https://app/cb", State: "state-1",
+	})
+	if err != nil {
+		t.Fatalf("InitAuthorize: %v", err)
+	}
+	ps := resp.GetProviderState().AsMap()
+	if ps["redirect_uri"] != "https://app/cb" {
+		t.Errorf("redirect_uri = %v", ps["redirect_uri"])
+	}
+	issued, _ := ps["issued_at"].(string)
+	if issued == "" {
+		t.Fatal("issued_at missing")
+	}
+	if _, perr := time.Parse(time.RFC3339Nano, issued); perr != nil {
+		t.Errorf("issued_at not RFC3339Nano: %v", perr)
+	}
+}
+
+// TestExchangeCode_RedirectURIMismatch_Rejects proves the plugin refuses a
+// callback whose redirect_uri differs from the one stashed at InitAuthorize.
+func TestExchangeCode_RedirectURIMismatch_Rejects(t *testing.T) {
+	idp := oidctest.NewIdP(t, "client-1")
+	cfg := pluginrt.Config{ClientID: "client-1", ClientSecret: "s"}
+	s := setupServer(t, cfg, idp)
+
+	nonce := "n"
+	code, _ := idp.IssueCode(t,
+		map[string]any{"sub": "u", "nonce": nonce, "email": "u@x.com", "email_verified": true},
+		map[string]any{"sub": "u", "email": "u@x.com"},
+		"access-tok-12345678",
+	)
+	pState, _ := structpb.NewStruct(map[string]any{
+		"pkce_verifier": "v",
+		"nonce":         nonce,
+		"redirect_uri":  "https://app/cb",
+	})
+	_, err := s.ExchangeCode(context.Background(), &pluginv1.ExchangeCodeRequest{
+		Code: code, State: "s", RedirectUri: "https://evil/cb", ProviderState: pState,
+	})
+	if status.Code(err) != codes.Unauthenticated {
+		t.Errorf("code = %v, want Unauthenticated", status.Code(err))
+	}
+}
+
+// TestExchangeCode_RedirectURIMatch_Passes proves a matching redirect_uri does
+// not block an otherwise-valid login.
+func TestExchangeCode_RedirectURIMatch_Passes(t *testing.T) {
+	idp := oidctest.NewIdP(t, "client-1")
+	cfg := pluginrt.Config{ClientID: "client-1", ClientSecret: "s"}
+	s := setupServer(t, cfg, idp)
+
+	nonce := "n"
+	code, _ := idp.IssueCode(t,
+		map[string]any{"sub": "u", "nonce": nonce, "email": "u@x.com", "email_verified": true, "name": "U"},
+		map[string]any{"sub": "u", "email": "u@x.com", "name": "U"},
+		"access-tok-12345678",
+	)
+	pState, _ := structpb.NewStruct(map[string]any{
+		"pkce_verifier": "v",
+		"nonce":         nonce,
+		"redirect_uri":  "https://app/cb",
+	})
+	if _, err := s.ExchangeCode(context.Background(), &pluginv1.ExchangeCodeRequest{
+		Code: code, State: "s", RedirectUri: "https://app/cb", ProviderState: pState,
+	}); err != nil {
+		t.Errorf("expected pass, got %v", err)
+	}
+}
+
+// TestExchangeCode_StaleState_Rejects proves a callback whose issued_at is older
+// than the TTL is refused.
+func TestExchangeCode_StaleState_Rejects(t *testing.T) {
+	idp := oidctest.NewIdP(t, "client-1")
+	cfg := pluginrt.Config{ClientID: "client-1", ClientSecret: "s"}
+	s := setupServer(t, cfg, idp)
+
+	nonce := "n"
+	code, _ := idp.IssueCode(t,
+		map[string]any{"sub": "u", "nonce": nonce, "email": "u@x.com", "email_verified": true},
+		map[string]any{"sub": "u", "email": "u@x.com"},
+		"access-tok-12345678",
+	)
+	pState, _ := structpb.NewStruct(map[string]any{
+		"pkce_verifier": "v",
+		"nonce":         nonce,
+		"issued_at":     time.Now().Add(-30 * time.Minute).UTC().Format(time.RFC3339Nano),
+	})
+	_, err := s.ExchangeCode(context.Background(), &pluginv1.ExchangeCodeRequest{
+		Code: code, State: "s", RedirectUri: "/cb", ProviderState: pState,
+	})
+	if status.Code(err) != codes.Unauthenticated {
+		t.Errorf("code = %v, want Unauthenticated (stale state)", status.Code(err))
+	}
+}
+
+// TestExchangeCode_FreshState_Passes proves a recent issued_at does not block
+// a valid login.
+func TestExchangeCode_FreshState_Passes(t *testing.T) {
+	idp := oidctest.NewIdP(t, "client-1")
+	cfg := pluginrt.Config{ClientID: "client-1", ClientSecret: "s"}
+	s := setupServer(t, cfg, idp)
+
+	nonce := "n"
+	code, _ := idp.IssueCode(t,
+		map[string]any{"sub": "u", "nonce": nonce, "email": "u@x.com", "email_verified": true, "name": "U"},
+		map[string]any{"sub": "u", "email": "u@x.com", "name": "U"},
+		"access-tok-12345678",
+	)
+	pState, _ := structpb.NewStruct(map[string]any{
+		"pkce_verifier": "v",
+		"nonce":         nonce,
+		"issued_at":     time.Now().UTC().Format(time.RFC3339Nano),
+	})
+	if _, err := s.ExchangeCode(context.Background(), &pluginv1.ExchangeCodeRequest{
+		Code: code, State: "s", RedirectUri: "/cb", ProviderState: pState,
+	}); err != nil {
+		t.Errorf("expected pass, got %v", err)
+	}
+}
+
+// TestExchangeCode_NonceReplay_Rejects proves the one-time nonce guard refuses
+// a second ExchangeCode with the same nonce, even when everything else is
+// valid. Each replay needs a freshly-issued auth code (the IdP code is also
+// single-use), so the second attempt is rejected specifically by the replay
+// guard before any exchange happens.
+func TestExchangeCode_NonceReplay_Rejects(t *testing.T) {
+	idp := oidctest.NewIdP(t, "client-1")
+	cfg := pluginrt.Config{ClientID: "client-1", ClientSecret: "s"}
+	nonce := newMemNonce()
+	s := setupServerWith(t, cfg, idp, nil, nonce.consume)
+
+	mkCode := func() string {
+		code, _ := idp.IssueCode(t,
+			map[string]any{"sub": "u", "nonce": "n", "email": "u@x.com", "email_verified": true, "name": "U"},
+			map[string]any{"sub": "u", "email": "u@x.com", "name": "U"},
+			"access-tok-12345678",
+		)
+		return code
+	}
+	mkState := func() *structpb.Struct {
+		ps, _ := structpb.NewStruct(map[string]any{"pkce_verifier": "v", "nonce": "n"})
+		return ps
+	}
+
+	if _, err := s.ExchangeCode(context.Background(), &pluginv1.ExchangeCodeRequest{
+		Code: mkCode(), State: "s", RedirectUri: "/cb", ProviderState: mkState(),
+	}); err != nil {
+		t.Fatalf("first exchange should succeed: %v", err)
+	}
+	_, err := s.ExchangeCode(context.Background(), &pluginv1.ExchangeCodeRequest{
+		Code: mkCode(), State: "s", RedirectUri: "/cb", ProviderState: mkState(),
+	})
+	if status.Code(err) != codes.Unauthenticated {
+		t.Errorf("code = %v, want Unauthenticated (replay)", status.Code(err))
+	}
+}
+
+// TestExchangeCode_RateLimited_ReturnsResourceExhausted proves an exhausted
+// limiter short-circuits the call with ResourceExhausted + RetryInfo, before
+// any token exchange.
+func TestExchangeCode_RateLimited_ReturnsResourceExhausted(t *testing.T) {
+	idp := oidctest.NewIdP(t, "client-1")
+	cfg := pluginrt.Config{ClientID: "client-1", ClientSecret: "s"}
+	lim := ratelimit.New(0.001, 1) // burst 1, effectively no refill
+	s := setupServerWith(t, cfg, idp, lim, nil)
+
+	pState, _ := structpb.NewStruct(map[string]any{"pkce_verifier": "v", "nonce": "n"})
+
+	// First call consumes the only token. With no peer in context both calls
+	// share the "unknown" bucket. The first will fail on exchange (bogus code)
+	// but that still happens after the token is consumed.
+	_, _ = s.ExchangeCode(context.Background(), &pluginv1.ExchangeCodeRequest{
+		Code: "bogus", State: "s", RedirectUri: "/cb", ProviderState: pState,
+	})
+	_, err := s.ExchangeCode(context.Background(), &pluginv1.ExchangeCodeRequest{
+		Code: "bogus", State: "s", RedirectUri: "/cb", ProviderState: pState,
+	})
+	if status.Code(err) != codes.ResourceExhausted {
+		t.Fatalf("code = %v, want ResourceExhausted", status.Code(err))
+	}
+	// RetryInfo detail must be present so the host can build a Retry-After.
+	var sawRetry bool
+	for _, d := range status.Convert(err).Details() {
+		if _, ok := d.(*errdetails.RetryInfo); ok {
+			sawRetry = true
+		}
+	}
+	if !sawRetry {
+		t.Error("expected RetryInfo detail on rate-limit error")
 	}
 }
