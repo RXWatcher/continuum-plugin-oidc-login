@@ -39,8 +39,15 @@ func TestLoadConfig_Defaults(t *testing.T) {
 	if cfg.LinkByEmail {
 		t.Errorf("link_by_email default should be false")
 	}
-	if strings.HasSuffix(cfg.IssuerURL, "/") {
-		t.Errorf("issuer_url should be right-trimmed: %q", cfg.IssuerURL)
+	// The issuer is preserved verbatim, trailing slash included. OIDC discovery
+	// compares the configured issuer against the one the provider returns
+	// byte-for-byte; normalising the slash away made every provider that
+	// publishes one — Authentik serves .../application/o/<app>/ — fail that
+	// check with a confusing "did not match the issuer URL returned by
+	// provider" error. Callers needing to append a path trim at the point of
+	// use instead.
+	if cfg.IssuerURL != "https://idp.example.com/" {
+		t.Errorf("issuer_url must be preserved verbatim: %q", cfg.IssuerURL)
 	}
 }
 
@@ -93,7 +100,7 @@ func TestLoadConfig_AllowsHTTPOnlyForLocalhostIssuer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadConfig: %v", err)
 	}
-	if cfg.IssuerURL != "http://localhost:8080" {
+	if cfg.IssuerURL != "http://localhost:8080/" {
 		t.Errorf("IssuerURL = %q", cfg.IssuerURL)
 	}
 }
@@ -393,3 +400,4 @@ func TestLoadConfig_FiltersAndMappingParse(t *testing.T) {
 		t.Errorf("mapping = %+v", cfg.ClaimRoleMapping)
 	}
 }
+

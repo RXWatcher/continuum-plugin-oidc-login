@@ -140,7 +140,13 @@ func LoadConfig(entries []*pluginv1.ConfigEntry) (Config, error) {
 		case "database_url":
 			cfg.DatabaseURL = stringOf(val)
 		case "issuer_url":
-			cfg.IssuerURL = strings.TrimRight(stringOf(val), "/")
+			// Preserved verbatim, trailing slash included. OIDC discovery
+			// compares the configured issuer against the one the provider
+			// returns byte-for-byte, and providers that publish a trailing
+			// slash (Authentik: .../application/o/<app>/) fail the check if we
+			// normalise it away. Callers that need to append a path trim
+			// locally at the point of use.
+			cfg.IssuerURL = strings.TrimSpace(stringOf(val))
 		case "client_id":
 			cfg.ClientID = stringOf(val)
 		case "client_secret":

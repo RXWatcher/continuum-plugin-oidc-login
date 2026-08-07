@@ -146,7 +146,9 @@ func (s *Server) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.IssuerURL != nil {
-		cur.IssuerURL = strings.TrimRight(strings.TrimSpace(*req.IssuerURL), "/")
+		// Verbatim except for surrounding whitespace — see runtime.go: the
+		// trailing slash is part of the issuer's identity, not noise.
+		cur.IssuerURL = strings.TrimSpace(*req.IssuerURL)
 	}
 	if req.ClientID != nil {
 		cur.ClientID = strings.TrimSpace(*req.ClientID)
