@@ -508,3 +508,33 @@ func TestUpdateConfig_AuditsMutation(t *testing.T) {
 		t.Errorf("secret_changed = %v, want true", rec["secret_changed"])
 	}
 }
+
+// A provider that failed discovery must not take the admin API down with it.
+// Configure used to return the error, which exited the process and 502'd the
+// SPA — the only place an operator can correct the issuer. The summary now
+// reports the failure instead, so a wrong value is visible and fixable.
+func TestConfigSummaryReportsProviderFailureInsteadOfHidingIt(t *testing.T) {
+	srv := admin.NewServer(admin.Deps{
+		ConfigFn:      func() pluginrt.Config { return pluginrt.Config{IssuerURL: "https://idp.example.com"} },
+		ProviderFn:    func() *pluginoidc.Provider { return nil },
+		ProviderErrFn: func() string { return "oidc discovery: issuer did not match" },
+	})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/api/v1/admin/config-summary", nil)
+	req.Header.Set("X-Silo-User-Role", "admin")
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != 200 {
+		t.Fatalf("admin summary must stay reachable while the provider is broken: %d", rec.Code)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body["provider_ready"] != false {
+		t.Errorf("provider_ready = %v, want false", body["provider_ready"])
+	}
+	if body["provider_error"] == "" {
+		t.Error("provider_error must explain why sign-in is unavailable")
+	}
+}

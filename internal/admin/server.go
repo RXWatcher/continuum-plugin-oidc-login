@@ -34,8 +34,13 @@ const maxResponseBytes = 10 << 20 // 10 MiB
 // ProviderFn are called per-request so the latest Configure values are
 // always observed.
 type Deps struct {
-	ConfigFn       func() pluginrt.Config
-	ProviderFn     func() *pluginoidc.Provider
+	ConfigFn   func() pluginrt.Config
+	ProviderFn func() *pluginoidc.Provider
+	// ProviderErrFn returns the last OIDC discovery failure, or "" when the
+	// provider is healthy. Admin stays reachable when discovery fails, so the
+	// SPA needs a way to tell the operator why sign-in is unavailable instead
+	// of silently showing a configured-looking form. Nil means "never failed".
+	ProviderErrFn  func() string
 	UpdateConfigFn func(context.Context, pluginrt.Config) error
 	// Limiter rate-limits the diagnostic endpoints (decode-id-token, discovery,
 	// simulate-claims), which run verification / outbound fetches on
@@ -234,7 +239,17 @@ func (s *Server) handleConfigSummary(w http.ResponseWriter, _ *http.Request) {
 		"email_verified_required": cfg.EmailVerifiedRequired,
 		"link_by_email":           cfg.LinkByEmail,
 		"available_icons":         pluginrt.AllowedIcons,
+		"provider_ready":          s.deps.ProviderFn() != nil,
+		"provider_error":          s.providerErr(),
 	})
+}
+
+// providerErr reports the last OIDC discovery failure, tolerating a nil hook.
+func (s *Server) providerErr() string {
+	if s.deps.ProviderErrFn == nil {
+		return ""
+	}
+	return s.deps.ProviderErrFn()
 }
 
 // handleDiscovery does a live fetch of the configured issuer's discovery doc

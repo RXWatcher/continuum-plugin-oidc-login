@@ -90,6 +90,10 @@ func main() {
 		consumeNonce,
 	)
 
+	// lastProviderErr holds the most recent OIDC discovery failure so the admin
+	// SPA can show the operator what is wrong with their settings.
+	var lastProviderErr atomic.Pointer[string]
+
 	applyConfig := func(cfg pluginrt.Config) error {
 		var prov *pluginoidc.Provider
 		if cfg.ProviderConfigured() {
@@ -107,8 +111,24 @@ func main() {
 				AllowLoopback: pluginrt.IssuerAllowsLoopback(cfg.IssuerURL),
 			})
 			if err != nil {
-				return fmt.Errorf("oidc provider: %w", err)
+				// NOT fatal. Configure failing here used to exit the process,
+				// which took the admin SPA down with it — and the SPA is the
+				// only way to correct an issuer. A wrong value became
+				// unfixable through the UI: the plugin crash-looped, the route
+				// 502'd, and the operator had nowhere to go. Record the error,
+				// leave the provider unconfigured so no half-built provider is
+				// ever handed to a login, and keep serving admin so the
+				// settings can be fixed.
+				msg := err.Error()
+				lastProviderErr.Store(&msg)
+				logger.Error("oidc provider unavailable; admin remains reachable so settings can be corrected",
+					"issuer_url", cfg.IssuerURL, "error", msg)
+				prov = nil
+			} else {
+				lastProviderErr.Store(nil)
 			}
+		} else {
+			lastProviderErr.Store(nil)
 		}
 		cfgPtr.Store(&cfg)
 		provPtr.Store(prov)
@@ -156,6 +176,12 @@ func main() {
 				return pluginrt.Config{}
 			},
 			ProviderFn: func() *pluginoidc.Provider { return provPtr.Load() },
+			ProviderErrFn: func() string {
+				if p := lastProviderErr.Load(); p != nil {
+					return *p
+				}
+				return ""
+			},
 			UpdateConfigFn: func(ctx context.Context, next pluginrt.Config) error {
 				st := storePtr.Load()
 				if st == nil {
